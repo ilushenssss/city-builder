@@ -1,0 +1,299 @@
+{
+  "categories": [
+    {
+      "id": "roads",
+      "name": "Дороги",
+      "color": [130, 130, 140],
+      "description": "Соединяют здания между собой"
+    },
+    {
+      "id": "residential",
+      "name": "Жилые здания",
+      "color": [90, 180, 90],
+      "description": "Дома для жителей города"
+    },
+    {
+      "id": "commercial",
+      "name": "Коммерция",
+      "color": [80, 140, 220],
+      "description": "Магазины и офисы — рабочие места и доход"
+    },
+    {
+      "id": "industrial",
+      "name": "Промышленность",
+      "color": [220, 180, 60],
+      "description": "Производство товаров и ресурсов"
+    },
+    {
+      "id": "utilities",
+      "name": "Коммунальные службы",
+      "color": [230, 120, 50],
+      "description": "Электричество и вода для зданий"
+    },
+    {
+      "id": "public",
+      "name": "Общественные здания",
+      "color": [190, 100, 170],
+      "description": "Образование, здоровье, безопасность, отдых"
+    }
+  ],
+
+  "items": [
+    {
+      "id": "road_dirt",
+      "name": "Грунтовая дорога",
+      "category": "roads",
+      "price": 5,
+      "upkeep": 0,
+      "size": [1, 1],
+      "color": [150, 120, 80],
+      "description": "Дешёвая, но медленная"
+    },
+    {
+      "id": "road_asphalt",
+      "name": "Асфальтовая дорога",
+      "category": "roads",
+      "price": 15,
+      "upkeep": 1,
+      "size": [1, 1],
+      "color": [90, 90, 95],
+      "description": "Стандартная городская дорога"
+    },
+    {
+      "id": "avenue",
+      "name": "Проспект",
+      "category": "roads",
+      "price": 40,
+      "upkeep": 2,
+      "size": [1, 1],
+      "color": [60, 60, 70],
+      "description": "Широкая дорога с большой пропускной способностью"
+    },
+    {
+      "id": "bridge",
+      "name": "Мост",
+      "category": "roads",
+      "price": 100,
+      "upkeep": 3,
+      "size": [1, 1],
+      "color": [170, 140, 110],
+      "placement": "water",
+      "description": "Дорога через воду"
+    },
+
+    {
+      "id": "house_small",
+      "name": "Маленький дом",
+      "category": "residential",
+      "price": 50,
+      "upkeep": 1,
+      "size": [1, 1],
+      "color": [200, 160, 90],
+      "description": "Жильё для небольшой семьи"
+    },
+    {
+      "id": "cottage",
+      "name": "Коттедж",
+      "category": "residential",
+      "price": 120,
+      "upkeep": 2,
+      "size": [1, 1],
+      "color": [180, 110, 80],
+      "description": "Просторный дом с участком"
+    },
+    {
+      "id": "apartment",
+      "name": "Многоэтажка",
+      "category": "residential",
+      "price": 400,
+      "upkeep": 5,
+      "size": [2, 2],
+      "color": [160, 160, 180],
+      "description": "Много жителей на небольшой площади"
+    },
+    {
+      "id": "skyscraper",
+      "name": "Небоскрёб",
+      "category": "residential",
+      "price": 1000,
+      "upkeep": 12,
+      "size": [2, 2],
+      "color": [120, 170, 210],
+      "description": "Огромный жилой комплекс"
+    },
+
+    {
+      "id": "kiosk",
+      "name": "Ларёк",
+      "category": "commercial",
+      "price": 40,
+      "upkeep": 1,
+      "size": [1, 1],
+      "color": [230, 200, 120],
+      "description": "Маленькая торговая точка"
+    },
+    {
+      "id": "shop",
+      "name": "Магазин",
+      "category": "commercial",
+      "price": 150,
+      "upkeep": 2,
+      "size": [1, 1],
+      "color": [100, 160, 230],
+      "description": "Продаёт товары жителям"
+    },
+    {
+      "id": "office",
+      "name": "Офис",
+      "category": "commercial",
+      "price": 350,
+      "upkeep": 4,
+      "size": [2, 2],
+      "color": [140, 180, 200],
+      "description": "Рабочие места для горожан"
+    },
+    {
+      "id": "mall",
+      "name": "Торговый центр",
+      "category": "commercial",
+      "price": 600,
+      "upkeep": 8,
+      "size": [2, 2],
+      "color": [70, 110, 190],
+      "description": "Привлекает покупателей со всего города"
+    },
+
+    {
+      "id": "farm",
+      "name": "Ферма",
+      "category": "industrial",
+      "price": 80,
+      "upkeep": 1,
+      "size": [2, 2],
+      "color": [170, 200, 90],
+      "description": "Производит еду"
+    },
+    {
+      "id": "sawmill",
+      "name": "Лесопилка",
+      "category": "industrial",
+      "price": 150,
+      "upkeep": 2,
+      "size": [1, 1],
+      "color": [140, 100, 60],
+      "description": "Производит древесину"
+    },
+    {
+      "id": "warehouse",
+      "name": "Склад",
+      "category": "industrial",
+      "price": 120,
+      "upkeep": 1,
+      "size": [1, 1],
+      "color": [160, 140, 110],
+      "description": "Хранит произведённые ресурсы"
+    },
+    {
+      "id": "factory",
+      "name": "Завод",
+      "category": "industrial",
+      "price": 300,
+      "upkeep": 5,
+      "size": [2, 2],
+      "color": [150, 80, 80],
+      "description": "Превращает сырьё в товары"
+    },
+
+    {
+      "id": "power_plant",
+      "name": "Электростанция",
+      "category": "utilities",
+      "price": 500,
+      "upkeep": 8,
+      "size": [2, 2],
+      "color": [200, 90, 50],
+      "description": "Снабжает город электричеством"
+    },
+    {
+      "id": "solar_panel",
+      "name": "Солнечная панель",
+      "category": "utilities",
+      "price": 200,
+      "upkeep": 1,
+      "size": [1, 1],
+      "color": [60, 90, 160],
+      "description": "Чистая энергия, но немного"
+    },
+    {
+      "id": "water_tower",
+      "name": "Водонапорная башня",
+      "category": "utilities",
+      "price": 150,
+      "upkeep": 2,
+      "size": [1, 1],
+      "color": [90, 170, 200],
+      "description": "Подаёт воду в дома"
+    },
+    {
+      "id": "water_treatment",
+      "name": "Водоочистная станция",
+      "category": "utilities",
+      "price": 400,
+      "upkeep": 5,
+      "size": [2, 2],
+      "color": [60, 140, 160],
+      "description": "Очищает воду для всего района"
+    },
+
+    {
+      "id": "park",
+      "name": "Парк",
+      "category": "public",
+      "price": 60,
+      "upkeep": 1,
+      "size": [1, 1],
+      "color": [60, 160, 70],
+      "description": "Жители становятся счастливее"
+    },
+    {
+      "id": "school",
+      "name": "Школа",
+      "category": "public",
+      "price": 300,
+      "upkeep": 4,
+      "size": [2, 2],
+      "color": [220, 150, 90],
+      "description": "Образование для детей"
+    },
+    {
+      "id": "hospital",
+      "name": "Больница",
+      "category": "public",
+      "price": 500,
+      "upkeep": 6,
+      "size": [2, 2],
+      "color": [230, 230, 235],
+      "description": "Лечит жителей"
+    },
+    {
+      "id": "police",
+      "name": "Полицейский участок",
+      "category": "public",
+      "price": 250,
+      "upkeep": 3,
+      "size": [1, 1],
+      "color": [60, 80, 160],
+      "description": "Снижает преступность"
+    },
+    {
+      "id": "fire_station",
+      "name": "Пожарная часть",
+      "category": "public",
+      "price": 250,
+      "upkeep": 3,
+      "size": [1, 1],
+      "color": [200, 50, 50],
+      "description": "Тушит пожары в округе"
+    }
+  ]
+}

@@ -8,6 +8,8 @@
 import random
 from collections.abc import Iterator
 
+from city_builder.data.catalog import PLACEMENT_WATER, ShopItem
+from city_builder.world.building import Building
 from city_builder.world.tile import Tile, TileType
 
 
@@ -19,6 +21,8 @@ class Grid:
         # Поэтому доступ к клетке — self.tiles[y][x] (сначала строка, потом столбец).
         # Изначально все клетки — трава.
         self.tiles = [[Tile(x, y) for x in range(width)] for y in range(height)]
+        # Список всех зданий — удобно перебирать при отрисовке и (на этапе 2) в экономике
+        self.buildings: list[Building] = []
 
     def in_bounds(self, x: int, y: int) -> bool:
         """Лежат ли координаты внутри карты."""
@@ -35,6 +39,45 @@ class Grid:
         if not self.in_bounds(x, y):
             return None
         return self.tiles[y][x]
+
+    # --- Строительство ---
+
+    def placement_error(self, item: ShopItem, x: int, y: int) -> str | None:
+        """Можно ли поставить товар item левым верхним углом в клетку (x, y).
+
+        Возвращает None, если можно, или текст причины, если нельзя.
+        Текст сразу показывается игроку, поэтому он на русском.
+        """
+        needs_water = item.placement == PLACEMENT_WATER
+        width, height = item.size
+        # Проверяем каждую клетку, которую займёт здание
+        for ty in range(y, y + height):
+            for tx in range(x, x + width):
+                tile = self.get(tx, ty)
+                if tile is None:
+                    return "Здание выходит за край карты"
+                if tile.building is not None:
+                    return f"Место занято: {tile.building.item.name}"
+                is_water = tile.type == TileType.WATER
+                if needs_water and not is_water:
+                    return f"{item.name}: строится только на воде"
+                if not needs_water and is_water:
+                    return "Нельзя строить на воде"
+        return None
+
+    def place(self, item: ShopItem, x: int, y: int) -> Building:
+        """Поставить здание. Перед вызовом место нужно проверить через placement_error."""
+        building = Building(item, x, y)
+        for tx, ty in building.footprint():
+            self.tiles[ty][tx].building = building
+        self.buildings.append(building)
+        return building
+
+    def remove(self, building: Building) -> None:
+        """Снести здание: освободить все его клетки и убрать из списка."""
+        for tx, ty in building.footprint():
+            self.tiles[ty][tx].building = None
+        self.buildings.remove(building)
 
     def __iter__(self) -> Iterator[Tile]:
         """Позволяет перебирать все клетки одним циклом: for tile in grid: ..."""

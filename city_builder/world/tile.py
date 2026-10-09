@@ -3,6 +3,8 @@
 from dataclasses import dataclass
 from enum import Enum
 
+from city_builder.world.building import Building
+
 
 class TileType(Enum):
     """Тип местности клетки.
@@ -13,7 +15,7 @@ class TileType(Enum):
     + цвет в config.TILE_COLORS.
     """
     GRASS = "grass"  # трава — на ней можно строить
-    WATER = "water"  # вода — на этапе 1 строить будет нельзя
+    WATER = "water"  # вода — строить можно только мосты
 
 
 # @dataclass автоматически создаёт __init__, __repr__ и __eq__
@@ -24,4 +26,6 @@ class Tile:
     x: int                            # столбец клетки на карте (0..GRID_WIDTH-1)
     y: int                            # строка клетки на карте (0..GRID_HEIGHT-1)
     type: TileType = TileType.GRASS   # тип местности, по умолчанию трава
-    # На этапе 1 сюда добавится поле building — здание на клетке.
+    # Здание на клетке (None — пусто). Здание 2×2 занимает 4 клетки,
+    # и во всех четырёх лежит ссылка на ОДИН и тот же объект Building.
+    building: Building | None = None
