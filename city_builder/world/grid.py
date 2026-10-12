@@ -8,6 +8,7 @@
 import random
 from collections.abc import Iterator
 
+from city_builder.config import ROAD_CATEGORIES
 from city_builder.data.catalog import PLACEMENT_WATER, ShopItem
 from city_builder.world.building import Building
 from city_builder.world.tile import Tile, TileType
@@ -21,8 +22,12 @@ class Grid:
         # Поэтому доступ к клетке — self.tiles[y][x] (сначала строка, потом столбец).
         # Изначально все клетки — трава.
         self.tiles = [[Tile(x, y) for x in range(width)] for y in range(height)]
-        # Список всех зданий — удобно перебирать при отрисовке и (на этапе 2) в экономике
+        # Список всех зданий — удобно перебирать при отрисовке и в экономике
         self.buildings: list[Building] = []
+        # «Номер версии» карты: увеличивается при каждой постройке и сносе.
+        # Экономика сравнивает его с запомненным и пересчитывает статистику,
+        # только если карта изменилась, — а не каждый кадр.
+        self.version = 0
 
     def in_bounds(self, x: int, y: int) -> bool:
         """Лежат ли координаты внутри карты."""
@@ -71,6 +76,7 @@ class Grid:
         for tx, ty in building.footprint():
             self.tiles[ty][tx].building = building
         self.buildings.append(building)
+        self.version += 1
         return building
 
     def remove(self, building: Building) -> None:
@@ -78,6 +84,36 @@ class Grid:
         for tx, ty in building.footprint():
             self.tiles[ty][tx].building = None
         self.buildings.remove(building)
+        self.version += 1
+
+    # --- Дороги ---
+
+    def is_road(self, x: int, y: int) -> bool:
+        """Стоит ли на клетке дорога."""
+        tile = self.get(x, y)
+        return (tile is not None and tile.building is not None
+                and tile.building.item.category in ROAD_CATEGORIES)
+
+    def site_has_road(self, x: int, y: int, width: int, height: int) -> bool:
+        """Есть ли дорога вплотную к области (сверху, снизу, слева или справа).
+
+        Для здания 2×2 в (5, 5) проверяются клетки вокруг него:
+
+              . R R .        R — проверяемые клетки
+              R # # R        # — само здание
+              R # # R        углы (.) не считаются: по диагонали дорога не примыкает
+              . R R .
+        """
+        for tx in range(x, x + width):
+            if self.is_road(tx, y - 1) or self.is_road(tx, y + height):  # сверху и снизу
+                return True
+        for ty in range(y, y + height):
+            if self.is_road(x - 1, ty) or self.is_road(x + width, ty):  # слева и справа
+                return True
+        return False
+
+    def has_road_access(self, building: Building) -> bool:
+        return self.site_has_road(building.x, building.y, building.width, building.height)
 
     def __iter__(self) -> Iterator[Tile]:
         """Позволяет перебирать все клетки одним циклом: for tile in grid: ..."""

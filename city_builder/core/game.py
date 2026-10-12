@@ -6,12 +6,15 @@ Game — «дирижёр». Сам почти ничего не делает, �
     Game
      ├── Catalog       — база товаров магазина (из data/shop.json)
      ├── Grid          — данные карты (что где лежит)
+     ├── Economy       — деньги, жители, тик экономики
+     ├── GameClock     — игровое время: пауза, скорость, когда делать тик
+     ├── GoalTracker   — цель игры, победа и поражение
      ├── Camera        — откуда мы смотрим на карту
      ├── InputHandler  — читает ввод, двигает Camera, ищет клетку в Grid
      ├── BuildMode     — строительство: выбранный товар, место, подтверждение
      ├── DemolishMode  — снос: выбор здания, подтверждение
      ├── Renderer      — рисует Grid через Camera (и призрак здания из BuildMode)
-     ├── UIManager     — интерфейс поверх карты: кнопки, меню, панель строительства
+     ├── UIManager     — интерфейс: панель ресурсов, кнопки, меню, панель строительства
      └── GameLoop      — крутит цикл и вызывает методы Game каждый кадр
 """
 
@@ -34,8 +37,12 @@ from city_builder.construction.build_mode import BuildMode
 from city_builder.construction.demolish_mode import DemolishMode
 from city_builder.core.game_loop import GameLoop
 from city_builder.data.catalog import load_catalog
+from city_builder.economy.clock import GameClock
+from city_builder.economy.economy import Economy
+from city_builder.economy.goals import GoalTracker
 from city_builder.input.input_handler import InputHandler
 from city_builder.render.camera import Camera
+from city_builder.render.images import ImageLibrary
 from city_builder.render.renderer import Renderer
 from city_builder.ui.ui_manager import UIManager
 from city_builder.world.grid import Grid
@@ -80,13 +87,35 @@ class Game:
             self.screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
         else:
             self.screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
-        # Реальный размер окна узнаём у самой поверхности — он мог выбраться автоматически
-        screen_width, screen_height = self.screen.get_size()
         self.running = True  # пока True — игровой цикл крутится
+
+        # --- То, что живёт всю программу (не меняется при «Новой игре») ---
+        # Картинки зданий. Создаём только после окна: загрузчику нужен
+        # convert_alpha(), а он работает лишь при открытом окне.
+        self.images = ImageLibrary()
+        self.renderer = Renderer(self.screen, self.images)
+        self.show_debug = False  # отладочный текст (FPS, клетка) — включается клавишей F3
+        self.loop = GameLoop(self, FPS)
+
+        # --- Всё, что относится к одной партии ---
+        self.new_game()
+
+    def new_game(self) -> None:
+        """Создать новую партию: карта, экономика, время, камера, интерфейс — с нуля.
+
+        Вызывается при запуске и по кнопке «Новая игра» на экране итогов.
+        Старые объекты просто заменяются новыми — Python сам удалит ненужные.
+        """
+        screen_width, screen_height = self.screen.get_size()
 
         # --- Мир ---
         self.grid = Grid(GRID_WIDTH, GRID_HEIGHT)
         self.grid.generate()  # озеро и река; generate(seed=42) — всегда одна и та же карта
+
+        # --- Экономика, время, цель ---
+        self.economy = Economy(self.grid)
+        self.clock = GameClock()
+        self.goals = GoalTracker(self.economy)
 
         # --- Камера ---
         # Размер мира в пикселях (при zoom = 1): клеток * TILE_SIZE
@@ -95,13 +124,12 @@ class Game:
         self.camera = Camera(screen_width, screen_height, world_width, world_height)
         self.camera.center_on(world_width / 2, world_height / 2)  # старт — в центре карты
 
-        # --- Ввод, отрисовка, цикл ---
+        # --- Ввод, режимы, интерфейс ---
         self.input = InputHandler(self.camera, self.grid)
-        self.build = BuildMode(self.grid)
-        self.demolish = DemolishMode(self.grid)
-        self.renderer = Renderer(self.screen)
-        self.ui = UIManager(self.screen.get_size(), self.catalog, self.build, self.demolish)
-        self.loop = GameLoop(self, FPS)
+        self.build = BuildMode(self.grid, self.economy)
+        self.demolish = DemolishMode(self.grid, self.economy)
+        self.ui = UIManager(self.screen.get_size(), self.catalog, self.build, self.demolish,
+                            self.images, self.economy, self.clock, self.goals)
 
     def handle_event(self, event: pygame.event.Event) -> None:
         """Шаг 1 кадра: GameLoop передаёт сюда каждое событие pygame.
@@ -114,6 +142,9 @@ class Game:
         «or» вызывает следующего, только если предыдущий вернул False.
         Строительство и снос не включены одновременно, поэтому не мешают друг другу.
         """
+        if event.type == pygame.KEYDOWN and event.key == pygame.K_F3:
+            self.show_debug = not self.show_debug  # not — «наоборот»: True <-> False
+            return
         consumed = (self.ui.handle_event(event)
                     or self.build.handle_event(event)
                     or self.demolish.handle_event(event))
@@ -122,6 +153,8 @@ class Game:
         # Выйти можно с клавиатуры/крестика окна (input) или кнопкой выхода (ui)
         if self.input.quit_requested or self.ui.quit_requested:
             self.running = False  # цикл в GameLoop завершится
+        elif self.ui.new_game_requested:
+            self.new_game()  # «Новая игра» на экране итогов
 
     def update(self, dt: float) -> None:
         """Шаг 2 кадра: обновление состояния. dt — секунды с прошлого кадра."""
@@ -142,7 +175,24 @@ class Game:
         self.demolish.update_hover(self.input.hovered_tile)
 
         self.camera.clamp()    # после всех движений не даём камере уехать с карты
-        # На этапе 2 здесь появится тик экономики
+
+        # --- Экономика ---
+        # Пересчёт статистики (только если что-то построили/снесли)
+        self.economy.refresh()
+        if self.goals.finished:
+            return  # игра окончена (экран итогов) — время стоит
+
+        # Часы говорят, сколько тиков пора сделать (обычно 0, иногда 1)
+        for _ in range(self.clock.update(dt)):  # _ — переменная, которая не нужна
+            self.economy.tick()
+            self.goals.on_tick()  # проверка победы и поражения
+            if self.goals.finished:
+                # Игра только что закончилась: выключаем строительство, снос и меню,
+                # чтобы после «Продолжить» не оказаться в середине действия
+                self.build.cancel()
+                self.demolish.cancel()
+                self.ui.menu.close()
+                break
 
     def draw(self) -> None:
         """Шаг 3 кадра: отрисовка. Порядок важен — то, что рисуется позже, оказывается сверху."""
@@ -154,16 +204,18 @@ class Game:
         else:
             self.renderer.draw_hover(self.input.hovered_tile, self.camera)  # рамка клетки
 
-        # Отладочная информация поверх всего
-        tile = self.input.hovered_tile
-        tile_info = f"{tile.x}, {tile.y} ({tile.type.value})" if tile else "-"
-        if tile and tile.building:
-            tile_info += f" — {tile.building.item.name}"
-        self.renderer.draw_debug([
-            f"FPS: {self.loop.current_fps:.0f}",
-            f"Zoom: {self.camera.zoom:.2f}",
-            f"Tile: {tile_info}",
-        ])
+        # Отладочная информация (F3) — под панелью ресурсов
+        if self.show_debug:
+            tile = self.input.hovered_tile
+            tile_info = f"{tile.x}, {tile.y} ({tile.type.value})" if tile else "-"
+            if tile and tile.building:
+                state = "работает" if tile.building.working else "нет дороги"
+                tile_info += f" — {tile.building.item.name} ({state})"
+            self.renderer.draw_debug([
+                f"FPS: {self.loop.current_fps:.0f}",
+                f"Zoom: {self.camera.zoom:.2f}",
+                f"Tile: {tile_info}",
+            ], top=self.ui.goal_panel.rect.bottom + 8)
 
         # Интерфейс рисуем последним — он всегда поверх карты
         self.ui.draw(self.screen)

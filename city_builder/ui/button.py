@@ -25,6 +25,7 @@ ICON_CLOSE = "close"  # крестик
 ICON_EXIT = "exit"    # значок «питание»: кружок с разрывом сверху и чёрточкой
 ICON_BACK = "back"    # стрелка влево
 ICON_DEMOLISH = "demolish"  # мусорная корзина (снос зданий)
+ICON_PAUSE = "pause"  # две вертикальные полоски
 
 
 class Button:
@@ -100,6 +101,11 @@ class Button:
             pygame.draw.line(screen, COLOR_UI_ICON, (left, cy), (right, cy), width)
             pygame.draw.line(screen, COLOR_UI_ICON, (left, cy), (cx, top), width)
             pygame.draw.line(screen, COLOR_UI_ICON, (left, cy), (cx, bottom), width)
+        elif self.icon == ICON_PAUSE:
+            # Две вертикальные полоски по бокам от центра
+            cx = self.rect.centerx
+            for x in (cx - 4, cx + 4):
+                pygame.draw.line(screen, COLOR_UI_ICON, (x, top), (x, bottom), 4)
         elif self.icon == ICON_DEMOLISH:
             # Мусорная корзина: ручка, крышка, ведро с двумя полосками
             cx = round(self.rect.centerx)

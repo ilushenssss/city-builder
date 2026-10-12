@@ -31,6 +31,7 @@ from city_builder.config import (
     COLOR_UI_BORDER,
     COLOR_UI_CONFIRM_HOVER,
     COLOR_UI_DANGER_HOVER,
+    COLOR_WARNING,
     TEXT_BUTTON_HEIGHT,
     TEXT_BUTTON_WIDTH,
     UI_BORDER_RADIUS,
@@ -39,6 +40,7 @@ from city_builder.config import (
 )
 from city_builder.construction.build_mode import BuildMode, BuildState
 from city_builder.construction.demolish_mode import DemolishMode, DemolishState
+from city_builder.economy.economy import Economy
 from city_builder.ui.button import Button
 
 LEFT_BUTTON = 1
@@ -123,24 +125,31 @@ class BuildPanel:
         item = self.build.item
         assert item is not None  # панель рисуется, только когда товар выбран
         if self.build.state == BuildState.CONFIRMING:
-            return (f"Построить «{item.name}» за {item.price}?", COLOR_PRICE,
-                    "Enter — построить   Esc — выбрать другое место", COLOR_TEXT_DIM)
+            title = f"Построить «{item.name}» за {item.price}?"
+            warning = self.build.target_warning
+            if warning:
+                return title, COLOR_PRICE, f"Внимание: {warning}", COLOR_WARNING
+            return title, COLOR_PRICE, "Enter — построить   Esc — выбрать другое место", COLOR_TEXT_DIM
         width, height = item.size
         title = f"Строительство: {item.name}   Цена: {item.price}   Размер: {width}×{height}"
         if self.build.cursor_error:
             # Курсор над местом, где строить нельзя, — объясняем почему
             return title, COLOR_TEXT, self.build.cursor_error, COLOR_TEXT_ERROR
+        if self.build.cursor_warning:
+            # Строить можно, но есть проблема (нет дороги)
+            return title, COLOR_TEXT, self.build.cursor_warning, COLOR_WARNING
         return (title, COLOR_TEXT,
                 "ЛКМ — выбрать место   ПКМ / Esc — отменить строительство", COLOR_TEXT_DIM)
 
     def _demolish_texts(self) -> tuple[str, Color, str, Color]:
         """(заголовок, его цвет, подсказка, её цвет) для сноса."""
         if self.demolish.state == DemolishState.CONFIRMING and self.demolish.target:
-            return (f"Снести «{self.demolish.target.item.name}»?", COLOR_TEXT_ERROR,
+            item = self.demolish.target.item
+            return (f"Снести «{item.name}»? Вернётся {Economy.refund_for(item)}", COLOR_TEXT_ERROR,
                     "Enter — снести   Esc — выбрать другое здание", COLOR_TEXT_DIM)
         hovered = self.demolish.hovered
         if hovered:
-            return (f"Снос: {hovered.item.name}", COLOR_TEXT,
+            return (f"Снос: {hovered.item.name}   Вернётся: {Economy.refund_for(hovered.item)}", COLOR_TEXT,
                     "ЛКМ — выбрать для сноса   ПКМ / Esc — выйти из режима сноса", COLOR_TEXT_DIM)
         return ("Снос зданий", COLOR_TEXT,
                 "Наведите курсор на здание   ПКМ / Esc — выйти из режима сноса", COLOR_TEXT_DIM)

@@ -18,6 +18,7 @@ from enum import Enum, auto
 
 import pygame
 
+from city_builder.economy.economy import Economy
 from city_builder.world.building import Building
 from city_builder.world.grid import Grid
 from city_builder.world.tile import Tile
@@ -33,8 +34,9 @@ class DemolishState(Enum):
 
 
 class DemolishMode:
-    def __init__(self, grid: Grid) -> None:
+    def __init__(self, grid: Grid, economy: Economy) -> None:
         self.grid = grid
+        self.economy = economy  # чтобы вернуть часть стоимости при сносе
         self.state = DemolishState.IDLE
         self.hovered: Building | None = None  # здание под курсором (обновляется каждый кадр)
         self.hovered_tile: Tile | None = None  # клетка под курсором (для подсветки пустой клетки)
@@ -80,7 +82,7 @@ class DemolishMode:
             return None
         building = self.target
         self.grid.remove(building)
-        # На этапе 2 здесь можно вернуть часть стоимости (например, половину цены)
+        self.economy.refund(building.item)  # возвращаем часть цены (DEMOLISH_REFUND)
         self.target = None
         self.hovered = None
         self.state = DemolishState.SELECTING  # можно сносить дальше

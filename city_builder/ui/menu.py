@@ -43,6 +43,8 @@ import pygame
 from city_builder.config import (
     CARD_GAP,
     CARD_HEIGHT,
+    CARD_IMAGE_HEIGHT,
+    CARD_PADDING,
     CARD_WIDTH,
     CLOSE_BUTTON_SIZE,
     COLOR_MENU_OVERLAY,
@@ -55,7 +57,8 @@ from city_builder.config import (
     MENU_HEADER_HEIGHT,
     UI_BORDER_RADIUS,
 )
-from city_builder.data.catalog import Catalog
+from city_builder.data.catalog import Catalog, ShopItem
+from city_builder.render.images import ImageLibrary
 from city_builder.ui.button import ICON_BACK, ICON_CLOSE, Button
 from city_builder.ui.card import Card, CardFonts
 
@@ -69,6 +72,26 @@ PAGE_SHOP = "shop"
 def category_page_id(category_id: str) -> str:
     """id страницы с товарами категории: "roads" -> "shop/roads"."""
     return f"{PAGE_SHOP}/{category_id}"
+
+
+def item_details_lines(item: ShopItem) -> list[str]:
+    """Характеристики товара для карточки, по строке на тему:
+        «Работа: 6 · Доход: 12»   — что здание даёт
+        «Содержание: 2»           — сколько стоит за тик
+    Показываем только то, что у товара есть (нули пропускаем)."""
+    gives = []
+    if item.housing:
+        gives.append(f"Жильё: {item.housing}")
+    if item.workers:
+        gives.append(f"Работа: {item.workers}")
+    if item.income:
+        gives.append(f"Доход: {item.income}")
+    lines = []
+    if gives:
+        lines.append(" · ".join(gives))  # " · ".join(["a", "b"]) -> "a · b"
+    if item.upkeep:
+        lines.append(f"Содержание: {item.upkeep}")
+    return lines
 
 
 def items_count_text(n: int) -> str:
@@ -94,8 +117,9 @@ class MenuPage:
 
 class Menu:
     def __init__(self, screen_size: tuple[int, int], catalog: Catalog,
-                 on_item_selected: Callable[[str], None]) -> None:
+                 on_item_selected: Callable[[str], None], images: ImageLibrary) -> None:
         self.is_open = False
+        self.images = images  # картинки для карточек магазина
         # Функция, которую меню вызовет, когда игрок кликнет по товару.
         # Меню не знает, что дальше делать с товаром, — это решает тот,
         # кто передал функцию (UIManager включит режим строительства).
@@ -156,6 +180,14 @@ class Menu:
             rects.append(pygame.Rect(x, y, CARD_WIDTH, CARD_HEIGHT))
         return rects
 
+    def _card_image(self, image: pygame.Surface | None) -> pygame.Surface | None:
+        """Уменьшить картинку под область картинки в карточке (с сохранением пропорций).
+        Делается один раз при создании меню, а не каждый кадр."""
+        if image is None:
+            return None
+        area = (CARD_WIDTH - 2 * CARD_PADDING, CARD_IMAGE_HEIGHT)
+        return self.images.fit(image, area)
+
     def _build_pages(self, catalog: Catalog) -> dict[str, MenuPage]:
         """Создать все страницы меню. Новая страница = новая запись в словаре."""
         pages: dict[str, MenuPage] = {}
@@ -179,6 +211,7 @@ class Menu:
                 rect,
                 category.name,
                 color=category.color,
+                image=self._card_image(self.images.for_category(category)),
                 description=category.description,
                 footer=items_count_text(len(items)),
                 opens=page_id,
@@ -192,7 +225,9 @@ class Menu:
                     item_rect,
                     item.name,
                     color=item.color,
+                    image=self._card_image(self.images.for_item(item)),
                     description=item.description,
+                    details=item_details_lines(item),
                     footer=f"Цена: {item.price}",
                     badge=f"{width}×{height}",  # сколько клеток занимает здание
                     item_id=item.id,

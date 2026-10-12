@@ -42,8 +42,11 @@ class CatalogError(Exception):
 class Category:
     id: str            # уникальный идентификатор, на него ссылаются товары
     name: str          # название для игрока
-    color: Color       # цвет карточки-заглушки (позже — иконка)
+    color: Color       # цвет, если картинки нет
     description: str   # короткое описание
+    # Путь к картинке относительно папки assets/. None — искать по умолчанию:
+    # assets/categories/<id>.png (см. render/images.py)
+    image: str | None = None
 
 
 @dataclass(frozen=True)
@@ -52,11 +55,20 @@ class ShopItem:
     name: str               # название для игрока
     category: str           # id категории, к которой относится товар
     price: int              # цена постройки
-    upkeep: int             # содержание — сколько стоит за каждый тик экономики (этап 2)
+    upkeep: int             # содержание — сколько денег списывается за каждый тик экономики
     size: tuple[int, int]   # сколько клеток занимает: (ширина, высота)
-    color: Color            # цвет на карте и на карточке (позже — картинка)
+    color: Color            # цвет на карте и на карточке, если картинки нет
     description: str        # короткое описание
     placement: str = PLACEMENT_LAND  # где можно строить: PLACEMENT_LAND или PLACEMENT_WATER
+    # Путь к картинке относительно папки assets/. None — искать по умолчанию:
+    # assets/buildings/<id>.png (см. render/images.py)
+    image: str | None = None
+
+    # --- Экономика (см. economy/economy.py) ---
+    housing: int = 0          # мест для жителей (жилые здания)
+    workers: int = 0          # рабочих мест
+    income: int = 0           # доход за тик, если все рабочие места заняты
+    needs_road: bool = True   # работает, только если рядом есть дорога
 
 
 class Catalog:
@@ -137,6 +149,7 @@ def _parse_category(record: Any, index: int) -> Category:
         name=_get(record, "name", str, where),
         color=_parse_color(_get(record, "color", list, where), where),
         description=_get(record, "description", str, where, default=""),
+        image=_get(record, "image", str, where, default=None),
     )
 
 
@@ -151,6 +164,14 @@ def _parse_item(record: Any, index: int) -> ShopItem:
     upkeep = _get(record, "upkeep", int, where, default=0)
     if price < 0 or upkeep < 0:
         raise CatalogError(f"{where}: цена и содержание не могут быть отрицательными")
+
+    # Экономические поля: необязательные, по умолчанию 0, отрицательными быть не могут
+    economy = {}
+    for field in ("housing", "workers", "income"):
+        value = _get(record, field, int, where, default=0)
+        if value < 0:
+            raise CatalogError(f'{where}: поле "{field}" не может быть отрицательным')
+        economy[field] = value
 
     placement = _get(record, "placement", str, where, default=PLACEMENT_LAND)
     if placement not in PLACEMENTS:
@@ -168,6 +189,9 @@ def _parse_item(record: Any, index: int) -> ShopItem:
         color=_parse_color(_get(record, "color", list, where), where),
         description=_get(record, "description", str, where, default=""),
         placement=placement,
+        image=_get(record, "image", str, where, default=None),
+        needs_road=_get(record, "needs_road", bool, where, default=True),
+        **economy,  # ** раскрывает словарь в именованные аргументы: housing=..., workers=...
     )
 
 
@@ -180,7 +204,13 @@ def _parse_item(record: Any, index: int) -> ShopItem:
 _MISSING = object()
 
 # Названия типов для сообщений об ошибках
-_TYPE_NAMES = {str: "строкой", int: "целым числом", list: "списком [...]", dict: "объектом {...}"}
+_TYPE_NAMES = {
+    str: "строкой",
+    int: "целым числом",
+    bool: "true или false",
+    list: "списком [...]",
+    dict: "объектом {...}",
+}
 
 
 def _get(record: dict, field: str, expected_type: type, where: str, default: Any = _MISSING) -> Any:

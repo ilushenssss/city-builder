@@ -6,11 +6,12 @@
 
     ┌──────────────────┐
     │ ┌──────────────┐ │
-    │ │    color     │ │  <- цветной прямоугольник (заглушка для картинки)
+    │ │ image / color│ │  <- картинка, а если её нет — цветной прямоугольник
     │ └──────────────┘ │
     │      title       │  <- название (переносится на несколько строк)
     │   description    │  <- описание (сколько поместится)
     │                  │
+    │     details      │  <- характеристики: «Жильё: 6 · Содержание: 1» (голубым)
     │ footer     badge │  <- внизу: слева, например, цена; справа — размер
     └──────────────────┘
 
@@ -19,7 +20,7 @@
 
 Поведение по клику (обрабатывает Menu):
   * opens   — какую страницу меню открыть (например, категорию магазина);
-  * item_id — какой товар выбран (используем на этапе 1 для строительства).
+  * item_id — какой товар выбран (включает режим строительства).
 """
 
 from dataclasses import dataclass
@@ -31,6 +32,8 @@ from city_builder.config import (
     CARD_PADDING,
     COLOR_CARD,
     COLOR_CARD_HOVER,
+    COLOR_CARD_IMAGE_BG,
+    COLOR_DETAILS,
     COLOR_PRICE,
     COLOR_TEXT,
     COLOR_TEXT_DIM,
@@ -88,7 +91,9 @@ class Card:
         title: str | None = None,
         *,  # всё после звёздочки можно передавать только по имени: Card(rect, color=...)
         color: Color | None = None,
+        image: pygame.Surface | None = None,
         description: str = "",
+        details: list[str] | None = None,
         footer: str | None = None,
         badge: str | None = None,
         opens: str | None = None,
@@ -97,7 +102,14 @@ class Card:
         self.rect = rect                # положение и размер карточки на экране
         self.title = title              # название (None — пустая карточка)
         self.color = color              # цвет картинки-заглушки (None — без картинки)
+        # Картинка, уже уменьшенная под размер карточки (это делает Menu).
+        # Если она есть, вместо цветного прямоугольника рисуется она.
+        self.image = image
         self.description = description  # описание мелким шрифтом
+        # Характеристики над нижней строкой — список строк. «or []»: если передали None,
+        # берём пустой список (пустой список по умолчанию в аргументах писать нельзя —
+        # он был бы общим для всех карточек)
+        self.details = details or []
         self.footer = footer            # текст внизу слева (цена, количество товаров)
         self.badge = badge              # текст внизу справа (размер здания)
         self.opens = opens              # id страницы меню, которую открывает клик
@@ -117,7 +129,7 @@ class Card:
         pygame.draw.rect(screen, COLOR_UI_BORDER, self.rect, 1, border_radius=UI_BORDER_RADIUS)
 
         # --- Простая карточка: только надпись по центру ---
-        if self.color is None and not self.description and not self.footer:
+        if self.color is None and self.image is None and not self.description and not self.footer:
             if self.title:
                 text = fonts.title.render(self.title, True, COLOR_TEXT)
                 screen.blit(text, text.get_rect(center=self.rect.center))
@@ -128,9 +140,15 @@ class Card:
         inner = self.rect.inflate(-2 * CARD_PADDING, -2 * CARD_PADDING)
         y = inner.top  # «курсор» по вертикали: куда рисовать следующий элемент
 
-        # 1. Картинка-заглушка
-        if self.color is not None:
-            image_rect = pygame.Rect(inner.left, y, inner.width, CARD_IMAGE_HEIGHT)
+        # 1. Картинка — или цветной прямоугольник, если картинки нет
+        image_rect = pygame.Rect(inner.left, y, inner.width, CARD_IMAGE_HEIGHT)
+        if self.image is not None:
+            # Тёмная подложка, а на ней картинка по центру
+            # (картинка уже уменьшена с сохранением пропорций и может быть уже области)
+            pygame.draw.rect(screen, COLOR_CARD_IMAGE_BG, image_rect, border_radius=UI_BORDER_RADIUS)
+            screen.blit(self.image, self.image.get_rect(center=image_rect.center))
+            y = image_rect.bottom + 10
+        elif self.color is not None:
             pygame.draw.rect(screen, self.color, image_rect, border_radius=UI_BORDER_RADIUS)
             y = image_rect.bottom + 10
 
@@ -142,17 +160,27 @@ class Card:
                 y += text.get_height()
             y += 6
 
-        # 3. Описание — сколько строк поместится до нижней строки
-        footer_top = inner.bottom - fonts.footer.get_height()
         line_height = fonts.text.get_linesize()
+
+        # 3. Характеристики — прижаты к низу, над ценой. Считаем их место заранее,
+        #    чтобы описание знало, где остановиться.
+        footer_top = inner.bottom - fonts.footer.get_height()
+        # Каждую строку характеристик тоже переносим, если она не влезает по ширине
+        details_lines = [part for line in self.details for part in wrap_text(line, fonts.text, inner.width)]
+        details_top = footer_top - 6 - len(details_lines) * line_height
+        for i, line in enumerate(details_lines):
+            text = fonts.text.render(line, True, COLOR_DETAILS)
+            screen.blit(text, text.get_rect(midtop=(inner.centerx, details_top + i * line_height)))
+
+        # 4. Описание — сколько строк поместится до характеристик
         for line in wrap_text(self.description, fonts.text, inner.width):
-            if y + line_height > footer_top - 4:
+            if y + line_height > details_top - 4:
                 break  # не помещается — остальное не рисуем, чтобы не залезть на цену
             text = fonts.text.render(line, True, COLOR_TEXT_DIM)
             screen.blit(text, text.get_rect(midtop=(inner.centerx, y)))
             y += line_height
 
-        # 4. Нижняя строка: footer слева, badge справа
+        # 5. Нижняя строка: footer слева, badge справа
         if self.footer:
             text = fonts.footer.render(self.footer, True, COLOR_PRICE)
             screen.blit(text, text.get_rect(bottomleft=inner.bottomleft))

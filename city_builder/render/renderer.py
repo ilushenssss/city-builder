@@ -25,7 +25,9 @@ from city_builder.config import (
     COLOR_TEXT,
     DEMOLISH_HOVER_ALPHA,
     DEMOLISH_TARGET_ALPHA,
+    COLOR_NO_ROAD_BADGE,
     FLAT_CATEGORIES,
+    NO_ROAD_DIM_ALPHA,
     GHOST_ALPHA,
     GRID_LINES_MIN_TILE_PX,
     TILE_COLORS,
@@ -34,6 +36,7 @@ from city_builder.config import (
 from city_builder.construction.build_mode import BuildMode, BuildState
 from city_builder.construction.demolish_mode import DemolishMode, DemolishState
 from city_builder.render.camera import Camera
+from city_builder.render.images import ImageLibrary
 from city_builder.world.building import Building
 from city_builder.world.grid import Grid
 from city_builder.world.tile import Tile
@@ -46,8 +49,9 @@ def darker(color: tuple[int, int, int], factor: float = 0.6) -> tuple[int, int, 
 
 
 class Renderer:
-    def __init__(self, screen: pygame.Surface) -> None:
+    def __init__(self, screen: pygame.Surface, images: ImageLibrary) -> None:
         self.screen = screen  # поверхность окна, на которой рисуем
+        self.images = images  # картинки зданий (с кэшем)
         # Шрифт загружаем один раз здесь, а не каждый кадр — это медленно.
         self.font = pygame.font.SysFont("consolas", 16)
 
@@ -105,9 +109,19 @@ class Renderer:
             rect = self.area_rect(building.x, building.y, building.width, building.height, camera)
             if rect.colliderect(screen_rect):  # здание за краем экрана не рисуем
                 self._draw_building(building, rect, camera)
+                if not building.working:
+                    self._draw_no_road_badge(rect, camera)
 
     def _draw_building(self, building: Building, rect: pygame.Rect, camera: Camera) -> None:
-        """Пока здание — цветной прямоугольник. Позже здесь будет картинка из assets/."""
+        """Картинка здания из assets/, а если её нет — цветной прямоугольник."""
+        image = self.images.for_item(building.item)
+        if image is not None:
+            # Картинка растягивается на все клетки здания. Отступы и тени
+            # рисует сам художник внутри картинки (прозрачными краями).
+            self.screen.blit(self.images.scaled(image, rect.size), rect)
+            return
+
+        # --- Запасной вариант: цвет ---
         color = building.item.color
         if building.item.category in FLAT_CATEGORIES:
             # Дорога — во всю клетку, без рамки: соседние клетки сливаются
@@ -121,6 +135,20 @@ class Renderer:
         radius = max(2, round(4 * camera.zoom))
         pygame.draw.rect(self.screen, color, body, border_radius=radius)
         pygame.draw.rect(self.screen, darker(color), body, 2, border_radius=radius)
+
+    def _draw_no_road_badge(self, rect: pygame.Rect, camera: Camera) -> None:
+        """Отметка на неработающем здании: здание затемнено, в углу красный кружок с «!»."""
+        self._draw_tinted(rect, (0, 0, 0), NO_ROAD_DIM_ALPHA)
+        radius = max(5, round(7 * camera.zoom))
+        # Кружок в правом верхнем углу, чуть внутрь от края
+        cx, cy = rect.right - radius - 2, rect.top + radius + 2
+        pygame.draw.circle(self.screen, COLOR_NO_ROAD_BADGE, (cx, cy), radius)
+        pygame.draw.circle(self.screen, (255, 255, 255), (cx, cy), radius, 1)
+        # Восклицательный знак: чёрточка и точка
+        line_w = max(2, radius // 3)
+        pygame.draw.line(self.screen, (255, 255, 255), (cx, cy - radius // 2),
+                         (cx, cy + radius // 6), line_w)
+        pygame.draw.circle(self.screen, (255, 255, 255), (cx, cy + radius // 2), max(1, line_w // 2 + 1))
 
     def draw_build_preview(self, build: BuildMode, camera: Camera) -> None:
         """«Призрак» здания: где оно встанет и можно ли его там построить.
@@ -140,8 +168,12 @@ class Renderer:
 
         width, height = build.item.size
         rect = self.area_rect(pos[0], pos[1], width, height, camera)
-        # Полупрозрачная заливка цветом здания + цветная рамка
-        self._draw_tinted(rect, build.item.color, GHOST_ALPHA)
+        # Полупрозрачная картинка здания (или полупрозрачный цвет) + цветная рамка
+        image = self.images.for_item(build.item)
+        if image is not None:
+            self.screen.blit(self.images.scaled(image, rect.size, GHOST_ALPHA), rect)
+        else:
+            self._draw_tinted(rect, build.item.color, GHOST_ALPHA)
         pygame.draw.rect(self.screen, frame_color, rect, 3)
 
     def draw_demolish_preview(self, demolish: DemolishMode, camera: Camera) -> None:
@@ -178,9 +210,9 @@ class Renderer:
             return
         pygame.draw.rect(self.screen, COLOR_HOVER, self.tile_rect(tile.x, tile.y, camera), 2)
 
-    def draw_debug(self, lines: list[str]) -> None:
-        """Отладочный текст в левом верхнем углу — по строке на элемент списка."""
-        y = 8  # отступ сверху
+    def draw_debug(self, lines: list[str], top: int = 8) -> None:
+        """Отладочный текст слева, начиная с высоты top, — по строке на элемент списка."""
+        y = top
         for line in lines:
             # render() превращает текст в картинку (Surface).
             # True — сглаживание краёв букв.

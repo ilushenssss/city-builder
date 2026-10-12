@@ -25,6 +25,7 @@ from enum import Enum, auto
 import pygame
 
 from city_builder.data.catalog import ShopItem
+from city_builder.economy.economy import Economy
 from city_builder.world.building import Building
 from city_builder.world.grid import Grid
 from city_builder.world.tile import Tile
@@ -41,8 +42,9 @@ class BuildState(Enum):
 
 
 class BuildMode:
-    def __init__(self, grid: Grid) -> None:
+    def __init__(self, grid: Grid, economy: Economy) -> None:
         self.grid = grid
+        self.economy = economy  # чтобы проверять и списывать деньги
         self.state = BuildState.IDLE
         self.item: ShopItem | None = None  # что строим
 
@@ -50,6 +52,8 @@ class BuildMode:
         # и почему туда нельзя (None — можно). Обновляется каждый кадр.
         self.cursor_pos: tuple[int, int] | None = None
         self.cursor_error: str | None = None
+        # Предупреждение: строить можно, но что-то не так (например, нет дороги)
+        self.cursor_warning: str | None = None
 
         # Выбранное место, ждущее подтверждения (только в CONFIRMING)
         self.target: tuple[int, int] | None = None
@@ -73,7 +77,37 @@ class BuildMode:
         self.item = None
         self.cursor_pos = None
         self.cursor_error = None
+        self.cursor_warning = None
         self.target = None
+
+    # --- Проверки места ---
+
+    def site_error(self, x: int, y: int) -> str | None:
+        """Почему здесь нельзя строить (None — можно): место или деньги."""
+        assert self.item is not None
+        error = self.grid.placement_error(self.item, x, y)
+        if error:
+            return error
+        if not self.economy.can_afford(self.item.price):
+            return f"Не хватает денег: нужно {self.item.price}, есть {self.economy.money}"
+        return None
+
+    def site_warning(self, x: int, y: int) -> str | None:
+        """Строить можно, но здание не будет работать — предупреждаем заранее."""
+        assert self.item is not None
+        width, height = self.item.size
+        if self.item.needs_road and not self.grid.site_has_road(x, y, width, height):
+            return "Рядом нет дороги — здание не будет работать"
+        return None
+
+    @property
+    def target_warning(self) -> str | None:
+        """Предупреждение для уже выбранного места (в подтверждении)."""
+        if self.target is None or self.item is None:
+            return None
+        return self.site_warning(*self.target)  # * раскладывает (x, y) на два аргумента
+
+    # --- Переходы между состояниями (продолжение) ---
 
     def choose_site(self) -> None:
         """Клик по карте: зафиксировать место под курсором, если там можно строить."""
@@ -92,12 +126,13 @@ class BuildMode:
         if self.state != BuildState.CONFIRMING or self.target is None or self.item is None:
             return None
         x, y = self.target
-        # Проверяем ещё раз: пока игрок думал, место могло стать недоступным
-        if self.grid.placement_error(self.item, x, y) is not None:
+        # Проверяем ещё раз: пока игрок думал, место могло стать недоступным,
+        # а деньги — закончиться (на содержание за прошедшие тики)
+        if self.site_error(x, y) is not None:
             self.reject()
             return None
+        self.economy.spend(self.item.price)
         building = self.grid.place(self.item, x, y)
-        # На этапе 2 здесь будет списание денег
         self.target = None
         self.state = BuildState.PLACING  # тот же товар — можно строить дальше
         return building
@@ -124,6 +159,7 @@ class BuildMode:
         if tile is None:  # курсор вне карты или над интерфейсом
             self.cursor_pos = None
             self.cursor_error = None
+            self.cursor_warning = None
             return
         # Курсор указывает на центр здания, а нам нужна левая верхняя клетка.
         # Для 1×1 и 2×2 это сама клетка под курсором, для 3×3 — на одну левее и выше.
@@ -131,7 +167,9 @@ class BuildMode:
         x = tile.x - (width - 1) // 2
         y = tile.y - (height - 1) // 2
         self.cursor_pos = (x, y)
-        self.cursor_error = self.grid.placement_error(self.item, x, y)
+        self.cursor_error = self.site_error(x, y)
+        # Предупреждение имеет смысл, только если строить вообще можно
+        self.cursor_warning = None if self.cursor_error else self.site_warning(x, y)
 
     # --- Ввод ---
 

@@ -45,6 +45,7 @@
       "category": "roads",
       "price": 5,
       "upkeep": 0,
+      "needs_road": false,
       "size": [1, 1],
       "color": [150, 120, 80],
       "description": "Дешёвая, но медленная"
@@ -54,7 +55,8 @@
       "name": "Асфальтовая дорога",
       "category": "roads",
       "price": 15,
-      "upkeep": 1,
+      "upkeep": 0,
+      "needs_road": false,
       "size": [1, 1],
       "color": [90, 90, 95],
       "description": "Стандартная городская дорога"
@@ -64,7 +66,8 @@
       "name": "Проспект",
       "category": "roads",
       "price": 40,
-      "upkeep": 2,
+      "upkeep": 1,
+      "needs_road": false,
       "size": [1, 1],
       "color": [60, 60, 70],
       "description": "Широкая дорога с большой пропускной способностью"
@@ -74,7 +77,8 @@
       "name": "Мост",
       "category": "roads",
       "price": 100,
-      "upkeep": 3,
+      "upkeep": 2,
+      "needs_road": false,
       "size": [1, 1],
       "color": [170, 140, 110],
       "placement": "water",
@@ -87,6 +91,7 @@
       "category": "residential",
       "price": 50,
       "upkeep": 1,
+      "housing": 6,
       "size": [1, 1],
       "color": [200, 160, 90],
       "description": "Жильё для небольшой семьи"
@@ -97,6 +102,7 @@
       "category": "residential",
       "price": 120,
       "upkeep": 2,
+      "housing": 10,
       "size": [1, 1],
       "color": [180, 110, 80],
       "description": "Просторный дом с участком"
@@ -107,6 +113,7 @@
       "category": "residential",
       "price": 400,
       "upkeep": 5,
+      "housing": 40,
       "size": [2, 2],
       "color": [160, 160, 180],
       "description": "Много жителей на небольшой площади"
@@ -117,6 +124,7 @@
       "category": "residential",
       "price": 1000,
       "upkeep": 12,
+      "housing": 100,
       "size": [2, 2],
       "color": [120, 170, 210],
       "description": "Огромный жилой комплекс"
@@ -128,6 +136,8 @@
       "category": "commercial",
       "price": 40,
       "upkeep": 1,
+      "workers": 2,
+      "income": 4,
       "size": [1, 1],
       "color": [230, 200, 120],
       "description": "Маленькая торговая точка"
@@ -138,6 +148,8 @@
       "category": "commercial",
       "price": 150,
       "upkeep": 2,
+      "workers": 6,
+      "income": 12,
       "size": [1, 1],
       "color": [100, 160, 230],
       "description": "Продаёт товары жителям"
@@ -148,6 +160,8 @@
       "category": "commercial",
       "price": 350,
       "upkeep": 4,
+      "workers": 20,
+      "income": 30,
       "size": [2, 2],
       "color": [140, 180, 200],
       "description": "Рабочие места для горожан"
@@ -158,6 +172,8 @@
       "category": "commercial",
       "price": 600,
       "upkeep": 8,
+      "workers": 30,
+      "income": 60,
       "size": [2, 2],
       "color": [70, 110, 190],
       "description": "Привлекает покупателей со всего города"
@@ -169,6 +185,8 @@
       "category": "industrial",
       "price": 80,
       "upkeep": 1,
+      "workers": 4,
+      "income": 8,
       "size": [2, 2],
       "color": [170, 200, 90],
       "description": "Производит еду"
@@ -179,6 +197,8 @@
       "category": "industrial",
       "price": 150,
       "upkeep": 2,
+      "workers": 8,
+      "income": 14,
       "size": [1, 1],
       "color": [140, 100, 60],
       "description": "Производит древесину"
@@ -189,6 +209,8 @@
       "category": "industrial",
       "price": 120,
       "upkeep": 1,
+      "workers": 3,
+      "income": 6,
       "size": [1, 1],
       "color": [160, 140, 110],
       "description": "Хранит произведённые ресурсы"
@@ -199,6 +221,8 @@
       "category": "industrial",
       "price": 300,
       "upkeep": 5,
+      "workers": 20,
+      "income": 35,
       "size": [2, 2],
       "color": [150, 80, 80],
       "description": "Превращает сырьё в товары"
@@ -210,6 +234,7 @@
       "category": "utilities",
       "price": 500,
       "upkeep": 8,
+      "workers": 15,
       "size": [2, 2],
       "color": [200, 90, 50],
       "description": "Снабжает город электричеством"
@@ -230,6 +255,7 @@
       "category": "utilities",
       "price": 150,
       "upkeep": 2,
+      "workers": 2,
       "size": [1, 1],
       "color": [90, 170, 200],
       "description": "Подаёт воду в дома"
@@ -240,6 +266,7 @@
       "category": "utilities",
       "price": 400,
       "upkeep": 5,
+      "workers": 10,
       "size": [2, 2],
       "color": [60, 140, 160],
       "description": "Очищает воду для всего района"
@@ -261,6 +288,7 @@
       "category": "public",
       "price": 300,
       "upkeep": 4,
+      "workers": 10,
       "size": [2, 2],
       "color": [220, 150, 90],
       "description": "Образование для детей"
@@ -271,6 +299,7 @@
       "category": "public",
       "price": 500,
       "upkeep": 6,
+      "workers": 15,
       "size": [2, 2],
       "color": [230, 230, 235],
       "description": "Лечит жителей"
@@ -281,6 +310,7 @@
       "category": "public",
       "price": 250,
       "upkeep": 3,
+      "workers": 6,
       "size": [1, 1],
       "color": [60, 80, 160],
       "description": "Снижает преступность"
@@ -291,6 +321,7 @@
       "category": "public",
       "price": 250,
       "upkeep": 3,
+      "workers": 6,
       "size": [1, 1],
       "color": [200, 50, 50],
       "description": "Тушит пожары в округе"
