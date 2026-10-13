@@ -4,13 +4,15 @@
 
 Сначала — что вообще РАБОТАЕТ (пересчитывается после постройки и сноса, refresh):
   * дорога рядом (если нужна);
-  * электричество и вода в районе (economy/networks.py) — без них здание стоит;
-  * счастье домов (economy/happiness.py).
+  * электричество (линии) и вода (водопровод) — economy/networks.py; без них здание стоит;
+  * счастье домов (economy/happiness.py);
+  * пути на работу для расчёта пробок (economy/traffic.py).
 
 Потом за каждый тик (tick):
 
   1. Работа. Работающих жителей = min(жители, рабочие места).
-     Укомплектованность = работающие / рабочие места (0..1).
+     Укомплектованность = работающие / рабочие места (0..1), умноженная на долю
+     работников, приехавших вовремя: в пробках опаздывают (TrafficModel.commute_factor).
 
   2. Производство по цепочкам (склад общий на весь город):
        ферма -> еда;  лесопилка -> древесина -> завод -> товары -> магазины.
@@ -22,6 +24,8 @@
 
   3. Еда. Жители съедают FOOD_PER_RESIDENT еды на человека.
      Еды не хватило — голод: часть жителей уезжает.
+
+  3½. Пробки снижают счастье домов, чей путь на работу забит (до −CONGESTION_HAPPINESS).
 
   4. Жители. Если сыты и счастливы — заселяют свободное жильё
      (быстрее при высоком счастье). Если счастье города ниже UNHAPPY_LEVEL — уезжают.
@@ -37,6 +41,7 @@ from dataclasses import dataclass, field
 from city_builder.config import (
     BASE_HAPPINESS,
     BASE_STORAGE,
+    CONGESTION_HAPPINESS,
     DEMOLISH_REFUND,
     FOOD_PER_RESIDENT,
     HUNGER_LEAVE,
@@ -50,6 +55,7 @@ from city_builder.config import (
 from city_builder.data.catalog import ShopItem
 from city_builder.economy.happiness import compute_happiness
 from city_builder.economy.networks import Infrastructure
+from city_builder.economy.traffic import TrafficModel
 from city_builder.world.building import Building
 from city_builder.world.grid import Grid
 
@@ -100,7 +106,9 @@ class Economy:
         # Склад: сколько каждого ресурса есть сейчас (дробные — производство бывает частичным)
         self.stock: dict[str, float] = {resource: 0.0 for resource in RESOURCE_NAMES}
         self.infrastructure = Infrastructure(grid)
+        self.traffic = TrafficModel(grid)
         self.last_report = TickReport()
+        self.traffic_penalty = 0.0  # насколько пробки снижают счастье города (считается в тике)
 
         self.stats = CityStats()
         self._stats_version = -1  # версия карты, для которой посчитаны stats
@@ -119,6 +127,11 @@ class Economy:
         if self.stats.jobs == 0:
             return 0.0
         return self.employed / self.stats.jobs
+
+    @property
+    def happiness(self) -> float:
+        """Счастье города с учётом пробок (stats.happiness — без них)."""
+        return max(0.0, self.stats.happiness - self.traffic_penalty)
 
     @property
     def problem_count(self) -> int:
@@ -153,6 +166,8 @@ class Economy:
             b.problems = self._infrastructure_problems(b)
         # 4. Сводка
         stats = CityStats()
+        for overlay in self.grid.overlays():  # линии, трубы, светофоры тоже стоят денег
+            stats.upkeep += overlay.item.upkeep
         for b in buildings:
             stats.upkeep += b.item.upkeep  # содержание платится всегда
             if not b.working:
@@ -162,6 +177,8 @@ class Economy:
             stats.storage += b.item.storage
         stats.happiness = compute_happiness(buildings)
         self.stats = stats
+        # 5. Пути на работу — для пробок
+        self.traffic.recompute_paths()
 
         # Снесли жильё (или оно осталось без света) — лишние жители уезжают сразу
         self.population = min(self.population, stats.housing)
@@ -187,8 +204,11 @@ class Economy:
         report = TickReport(upkeep=self.stats.upkeep,
                             produced={r: 0.0 for r in RESOURCE_NAMES},
                             consumed={r: 0.0 for r in RESOURCE_NAMES})
-        staffing = self.staffing
         employed = self.employed
+        # --- 1. Пробки: кто опоздал на работу и насколько это злит жителей ---
+        self.traffic.tick(self.population, self.stats.housing)
+        staffing = self.staffing * self.traffic.commute_factor
+        self._apply_traffic_happiness()
 
         # --- 2. Производство по цепочкам ---
         income = 0.0
@@ -210,7 +230,7 @@ class Economy:
         report.hungry = eaten < need - 1e-9  # 1e-9 — запас на неточность дробных чисел
 
         # --- 4. Жители ---
-        report.unhappy = self.stats.happiness < UNHAPPY_LEVEL
+        report.unhappy = self.happiness < UNHAPPY_LEVEL
         if report.hungry or report.unhappy:
             share = HUNGER_LEAVE if report.hungry else UNHAPPY_LEAVE
             leave = max(1, round(self.population * share)) if self.population else 0
@@ -219,7 +239,7 @@ class Economy:
             free = self.stats.housing - self.population
             if free > 0:
                 # Счастье ускоряет заселение: при 50 — обычная скорость, при 100 — вдвое быстрее
-                speed = POPULATION_GROWTH * self.stats.happiness / BASE_HAPPINESS
+                speed = POPULATION_GROWTH * self.happiness / BASE_HAPPINESS
                 self.population += min(free, max(1, round(free * speed)))
 
         # --- 5. Деньги ---
@@ -228,6 +248,16 @@ class Economy:
         self.last_report = report
         self.day += 1
         return report
+
+    def _apply_traffic_happiness(self) -> None:
+        """Пробки на пути на работу снижают счастье дома: загруженность 2.0 — полный штраф."""
+        total, weight = 0.0, 0
+        for home in self.grid.buildings:
+            if home.item.housing and home.working:
+                penalty = min(CONGESTION_HAPPINESS, max(0.0, home.congestion - 1) * CONGESTION_HAPPINESS)
+                total += penalty * home.item.housing
+                weight += home.item.housing
+        self.traffic_penalty = total / weight if weight else 0.0
 
     def _run_building(self, b: Building, staffing: float, report: TickReport) -> float:
         """Один тик одного работающего здания: берёт сырьё, производит, приносит доход.
@@ -265,15 +295,21 @@ class Economy:
     def site_warning(self, item: ShopItem, x: int, y: int) -> str | None:
         """Хватит ли зданию света и воды, если поставить его в (x, y)? None — хватит."""
         width, height = item.size
-        districts = self.infrastructure.districts_near(x, y, width, height)
+        infra = self.infrastructure
         if item.power_use:
-            spare = max((d.power_spare for d in districts), default=0)
+            nets = infra.power_nets_near(x, y, width, height)
+            if not nets:
+                return "Нет электричества: протяните линию или поставьте вплотную к зданию со светом"
+            spare = max(n.spare for n in nets)
             if spare < item.power_use:
-                return f"В районе не хватает электричества: нужно {item.power_use}, свободно {max(0, spare)}"
+                return f"В электросети не хватает энергии: нужно {item.power_use}, свободно {max(0, spare)}"
         if item.water_use:
-            spare = max((d.water_spare for d in districts), default=0)
+            nets = infra.water_nets_near(x, y, width, height)
+            if not nets:
+                return "Нет воды: проложите водопровод (снабжает в 2 клетках)"
+            spare = max(n.spare for n in nets)
             if spare < item.water_use:
-                return f"В районе не хватает воды: нужно {item.water_use}, свободно {max(0, spare)}"
+                return f"В водопроводе не хватает воды: нужно {item.water_use}, свободно {max(0, spare)}"
         return None
 
     # --- Покупка и снос ---

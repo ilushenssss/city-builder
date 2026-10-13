@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from enum import Enum
 
+from city_builder.data.catalog import ShopItem
 from city_builder.world.building import Building
 
 
@@ -29,3 +30,14 @@ class Tile:
     # Здание на клетке (None — пусто). Здание 2×2 занимает 4 клетки,
     # и во всех четырёх лежит ссылка на ОДИН и тот же объект Building.
     building: Building | None = None
+    # Природа на пустой клетке: "tree", "pine", "bush", "flowers", "rock" или None.
+    # Только для красоты: строить можно поверх — при постройке природа исчезает.
+    decor: str | None = None
+    # Вариант картинки природы и травы (0, 1, 2...) — чтобы одинаковые деревья
+    # и клетки травы не стояли «под копирку»
+    variant: int = 0
+    # Сети на клетке (товар из каталога — чтобы знать цену, содержание, название).
+    # Это не здания: они лежат «слоями» поверх или под клеткой.
+    power_line: ShopItem | None = None  # линия электропередач (над травой или дорогой)
+    pipe: ShopItem | None = None        # водопровод (под землёй — под чем угодно)
+    signal: ShopItem | None = None      # светофор (только на перекрёстке дорог)

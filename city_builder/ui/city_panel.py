@@ -3,7 +3,8 @@
     ┌──────────────────────────────────┐
     │ Энергия        180 / 300         │  <- потребляют / вырабатывают (жёлтым)
     │ Вода            40 / 80   −20    │  <- (синим); не хватает — красным, с размером нехватки
-    │ Счастье        65%               │
+    │ Счастье        65%   пробки −4   │
+    │ Дороги         72%   опаздывают 8% │  <- загруженность дорог
     │ Еда             30 / 100   +6    │  <- на складе / вместимость, изменение за тик
     │ Древесина       10 / 100   +2    │
     │ Товары          25 / 100   −1    │
@@ -20,6 +21,7 @@ from city_builder.config import (
     COLOR_POWER,
     COLOR_TEXT,
     COLOR_TEXT_DIM,
+    COLOR_WARNING,
     COLOR_UI_BORDER,
     COLOR_WATER,
     GOAL_PANEL_WIDTH,
@@ -30,8 +32,8 @@ from city_builder.config import (
 from city_builder.economy.economy import Economy
 
 PADDING = 12
-VALUE_X = 120   # где начинаются числа (от левого края панели)
-DELTA_X = 230   # где изменение за тик
+VALUE_X = 100   # где начинаются числа (от левого края панели)
+DELTA_X = 182   # где изменение за тик и пояснения
 
 Color = tuple[int, int, int]
 Row = tuple[str, str, Color, str, Color]  # (название, значение, его цвет, изменение, его цвет)
@@ -50,24 +52,32 @@ class CityPanel:
 
     def _build_rows(self) -> None:
         eco = self.economy
-        total = eco.infrastructure.totals()
+        power, water = eco.infrastructure.totals()
         rows: list[Row] = []
 
         # Энергия и вода: сколько потребляют / сколько вырабатывается.
         # Если кому-то не хватило (спрос больше выдачи) — число красное.
         for name, used, demand, supply, color in (
-            ("Энергия", total.power_used, total.power_demand, total.power_supply, COLOR_POWER),
-            ("Вода", total.water_used, total.water_demand, total.water_supply, COLOR_WATER),
+            ("Энергия", power.used, power.demand, power.supply, COLOR_POWER),
+            ("Вода", water.used, water.demand, water.supply, COLOR_WATER),
         ):
             short = demand - used
             value_color = COLOR_MONEY_NEGATIVE if short > 0 else color
             note = f"−{short}" if short > 0 else ""  # нехватка
             rows.append((name, f"{used} / {supply}", value_color, note, COLOR_MONEY_NEGATIVE))
 
-        happiness = round(eco.stats.happiness)
+        happiness = round(eco.happiness)
         h_color = COLOR_MONEY_NEGATIVE if happiness < UNHAPPY_LEVEL else (
             COLOR_MONEY_POSITIVE if happiness >= 60 else COLOR_TEXT)
-        rows.append(("Счастье", f"{happiness}%", h_color, "", COLOR_TEXT))
+        penalty = round(eco.traffic_penalty)
+        rows.append(("Счастье", f"{happiness}%", h_color,
+                     f"пробки −{penalty}" if penalty else "", COLOR_MONEY_NEGATIVE))
+        # Пробки: средняя загруженность дорог и сколько работников опаздывает
+        load = eco.traffic.average_ratio
+        load_color = COLOR_MONEY_POSITIVE if load < 0.7 else (COLOR_WARNING if load < 1 else COLOR_MONEY_NEGATIVE)
+        late = round((1 - eco.traffic.commute_factor) * 100)
+        rows.append(("Дороги", f"{round(load * 100)}%", load_color,
+                     f"опаздывают {late}%" if late else "", COLOR_MONEY_NEGATIVE))
 
         # Склад: сколько есть / вместимость и изменение за последний тик
         report = eco.last_report
@@ -98,7 +108,7 @@ class CityPanel:
         y = self.rect.top + PADDING
         line_h = self.font.get_linesize()
         for i, (name, value, value_color, delta, delta_color) in enumerate(self._rows):
-            if i == 3:
+            if i == 4:
                 # Линия-разделитель между «инфраструктурой» и «складом»
                 pygame.draw.line(screen, COLOR_UI_BORDER, (x, y + 1), (self.rect.right - PADDING, y + 1))
                 y += 4

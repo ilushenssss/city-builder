@@ -22,7 +22,6 @@ from city_builder.config import (
     COLOR_MONEY_POSITIVE,
     COLOR_PRICE,
     COLOR_TEXT,
-    COLOR_TEXT_DIM,
     COLOR_UI_BORDER,
     COLOR_WARNING,
     GAME_SPEEDS,
@@ -36,6 +35,7 @@ from city_builder.config import (
 from city_builder.economy.clock import GameClock
 from city_builder.economy.economy import Economy
 from city_builder.ui.button import ICON_PAUSE, Button
+from city_builder.ui.icons import icon
 
 LEFT_BUTTON = 1
 PADDING = 12        # отступ от краёв панели
@@ -48,12 +48,19 @@ SPEED_KEYS = {
     pygame.K_3: 3, pygame.K_KP3: 3,
 }
 
-# Подписи блоков: полные и короткие (для узкого экрана)
-LABELS = {"money": "Деньги: ", "people": "Жители: ", "jobs": "Работа: ", "problems": "Проблемы: "}
-SHORT_LABELS = {"money": "", "people": "Жит. ", "jobs": "Раб. ", "problems": "Пробл. "}
+# Значок каждого блока (см. ui/icons.py) и подсказка при наведении на блок
+ICONS = {"money": "coin", "people": "people", "jobs": "work", "problems": "warning", "day": "sun"}
+HINTS = {
+    "people": "Жители / мест в домах",
+    "jobs": "Работающие / рабочих мест",
+    "problems": "Зданий с проблемами — смотрите значки над ними",
+    "day": "Игровой день. Пробел — пауза, 1 / 2 / 3 — скорость",
+}
+ICON_SIZE = 20
+ICON_GAP = 6  # расстояние от значка до числа
 
-# Кусок текста одного цвета: ("Деньги: ", серый). Блок панели — несколько таких кусков.
-Piece = tuple[str, tuple[int, int, int]]
+# Кусок блока: текст одного цвета ("1 250", жёлтый) или готовая картинка (значок).
+Piece = tuple[str | pygame.Surface, tuple[int, int, int]]
 
 
 def format_number(n: int) -> str:
@@ -89,6 +96,9 @@ class ResourceBar:
         self.money_rect = pygame.Rect(0, 0, 0, 0)  # область «Деньги» — для подсказки
         self.day_rect = pygame.Rect(0, 0, 0, 0)    # область «День» — под ней полоска тика
         self.show_tooltip = False
+        # Где какой блок (для подсказок при наведении): [(имя блока, прямоугольник)]
+        self._segment_rects: list[tuple[str, pygame.Rect]] = []
+        self.hint: str | None = None  # короткая подсказка под наведённым блоком
 
     def contains(self, pos: tuple[int, int]) -> bool:
         return self.rect.collidepoint(pos)
@@ -116,28 +126,32 @@ class ResourceBar:
 
     # --- Содержимое панели ---
 
-    def _segments(self, compact: bool = False) -> list[list[Piece]]:
-        """Тексты всех блоков панели слева направо.
-        compact=True — короткие подписи, если панель не помещается на узком экране."""
+    def _segments(self, compact: bool = False) -> list[tuple[str, list[Piece]]]:
+        """Блоки панели слева направо: (имя блока, [значок, тексты]).
+        compact=True — без изменения денег за тик, если панель не помещается на узком экране."""
         eco = self.economy
-        label = SHORT_LABELS if compact else LABELS
         net = eco.forecast().net
         money_color = COLOR_MONEY_NEGATIVE if eco.money < 0 else COLOR_PRICE
         net_color = COLOR_MONEY_POSITIVE if net >= 0 else COLOR_MONEY_NEGATIVE
 
+        def head(name: str) -> Piece:
+            return icon(ICONS[name], ICON_SIZE), COLOR_TEXT
+
+        money: list[Piece] = [head("money"), (format_number(eco.money), money_color)]
+        if not compact:
+            money.append((f" ({format_signed(net)})", net_color))
         segments = [
-            [(label["money"], COLOR_TEXT_DIM), (format_number(eco.money), money_color),
-             (f" ({format_signed(net)})", net_color)],
-            [(label["people"], COLOR_TEXT_DIM),
-             (f"{format_number(eco.population)} / {format_number(eco.stats.housing)}", COLOR_TEXT)],
-            [(label["jobs"], COLOR_TEXT_DIM),
-             (f"{format_number(eco.employed)} / {format_number(eco.stats.jobs)}", COLOR_TEXT)],
+            ("money", money),
+            ("people", [head("people"),
+                        (f"{format_number(eco.population)} / {format_number(eco.stats.housing)}", COLOR_TEXT)]),
+            ("jobs", [head("jobs"),
+                      (f"{format_number(eco.employed)} / {format_number(eco.stats.jobs)}", COLOR_TEXT)]),
         ]
         problems = eco.problem_count
         if problems:
-            segments.append([(label["problems"], COLOR_TEXT_DIM), (str(problems), COLOR_WARNING)])
+            segments.append(("problems", [head("problems"), (str(problems), COLOR_WARNING)]))
         day_text = "Пауза" if self.clock.paused else f"День {eco.day}"
-        segments.append([(day_text, COLOR_WARNING if self.clock.paused else COLOR_TEXT)])
+        segments.append(("day", [head("day"), (day_text, COLOR_WARNING if self.clock.paused else COLOR_TEXT)]))
         return segments
 
     def _tooltip_lines(self) -> list[Piece]:
@@ -174,27 +188,36 @@ class ResourceBar:
             button.update(mouse_pos)
 
         self.show_tooltip = self.money_rect.collidepoint(mouse_pos)
+        self.hint = None
+        for name, rect in self._segment_rects:
+            if name in HINTS and rect.collidepoint(mouse_pos):
+                self.hint = HINTS[name]
 
-    def _layout(self, segments: list[list[Piece]]) -> None:
+    def _layout(self, segments: list[tuple[str, list[Piece]]]) -> None:
         """Разложить тексты и кнопки слева направо и посчитать ширину панели."""
         self._texts.clear()
         self._separators.clear()
+        self._segment_rects.clear()
         center_y = self.rect.centery
         x = self.rect.left + PADDING
 
-        for index, segment in enumerate(segments):
+        for index, (name, segment) in enumerate(segments):
             if index > 0:
                 self._separators.append(x + SEGMENT_GAP // 2)
                 x += SEGMENT_GAP
             start_x = x
-            for text, color in segment:
-                surface = self.font.render(text, True, color)
+            for piece, color in segment:
+                if isinstance(piece, pygame.Surface):  # значок
+                    surface, gap = piece, ICON_GAP
+                else:
+                    surface, gap = self.font.render(piece, True, color), 0
                 self._texts.append((surface, (x, center_y - surface.get_height() // 2)))
-                x += surface.get_width()
+                x += surface.get_width() + gap
             segment_rect = pygame.Rect(start_x, self.rect.top, x - start_x, self.rect.height)
-            if index == 0:
+            self._segment_rects.append((name, segment_rect))
+            if name == "money":
                 self.money_rect = segment_rect
-            if index == len(segments) - 1:
+            if name == "day":
                 self.day_rect = segment_rect
 
         # Кнопки скорости — справа от текста
@@ -228,6 +251,18 @@ class ResourceBar:
 
         if self.show_tooltip:
             self._draw_tooltip(screen)
+        elif self.hint:
+            self._draw_hint(screen)
+
+    def _draw_hint(self, screen: pygame.Surface) -> None:
+        """Короткая подсказка под наведённым блоком («Жители / мест в домах»)."""
+        text = self.tooltip_font.render(self.hint or "", True, COLOR_TEXT)
+        mouse_x = pygame.mouse.get_pos()[0]
+        box = pygame.Rect(0, 0, text.get_width() + 2 * PADDING, text.get_height() + 12)
+        box.topleft = (max(self.rect.left, mouse_x - box.width // 2), self.rect.bottom + 6)
+        pygame.draw.rect(screen, COLOR_MENU_PANEL, box, border_radius=UI_BORDER_RADIUS)
+        pygame.draw.rect(screen, COLOR_UI_BORDER, box, 1, border_radius=UI_BORDER_RADIUS)
+        screen.blit(text, (box.left + PADDING, box.top + 6))
 
     def _draw_tooltip(self, screen: pygame.Surface) -> None:
         """Небольшая панель под деньгами с расшифровкой доходов и расходов."""

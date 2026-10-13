@@ -27,6 +27,7 @@ from city_builder.config import (
     RESOURCE_NAMES,
     UI_BORDER_RADIUS,
 )
+from city_builder.economy.networks import Infrastructure
 from city_builder.world.building import Building
 
 PADDING = 10
@@ -39,13 +40,23 @@ PROBLEM_TEXTS = {
 Color = tuple[int, int, int]
 
 
-def building_lines(b: Building) -> list[tuple[str, Color]]:
+def _problem_text(b: Building, problem: str, networks: Infrastructure | None) -> str:
+    """Точная причина: нет подключения к сети вообще или сети не хватает мощности."""
+    if problem == "power" and networks is not None:
+        net = networks.power.get(b.power_net) if b.power_net is not None else None
+        return "в электросети не хватает энергии" if net and net.supply else "нет линии электропередач рядом"
+    if problem == "water" and networks is not None:
+        return "в водопроводе не хватает воды" if b.water_net is not None else "нет водопровода рядом"
+    return PROBLEM_TEXTS[problem]
+
+
+def building_lines(b: Building, networks: Infrastructure | None = None) -> list[tuple[str, Color]]:
     """Строки подсказки о здании: (текст, цвет)."""
     item = b.item
     lines: list[tuple[str, Color]] = [(item.name, COLOR_TEXT)]
 
     # --- Работает или нет и почему ---
-    blocking = [PROBLEM_TEXTS[p] for p in b.problems if p in PROBLEM_TEXTS]
+    blocking = [_problem_text(b, p, networks) for p in b.problems if p in PROBLEM_TEXTS]
     if blocking:
         lines.append(("Не работает: " + ", ".join(blocking), COLOR_MONEY_NEGATIVE))
     elif item.workers or item.consumes or item.produces:
@@ -60,6 +71,10 @@ def building_lines(b: Building) -> list[tuple[str, Color]]:
     # --- Что даёт ---
     if item.housing:
         lines.append((f"Жильё: {item.housing} · Счастье: {round(b.happiness)}%", COLOR_TEXT_DIM))
+        if b.congestion > 1:
+            lines.append((f"Пробки по дороге на работу: ×{b.congestion:.1f}", COLOR_MONEY_NEGATIVE))
+        elif b.congestion > 0.6:
+            lines.append(("Дорога на работу загружена", COLOR_WARNING))
     if item.workers:
         lines.append((f"Рабочих мест: {item.workers}", COLOR_TEXT_DIM))
     if item.consumes or item.produces:
@@ -94,6 +109,7 @@ class BuildingInfo:
     def __init__(self, screen_size: tuple[int, int]) -> None:
         self.screen_size = screen_size
         self.building: Building | None = None
+        self.networks: Infrastructure | None = None  # для точных причин «нет света / воды»
         self.mouse_pos = (0, 0)
         self.title_font = pygame.font.SysFont("consolas", 15, bold=True)
         self.font = pygame.font.SysFont("consolas", 14)
@@ -105,7 +121,7 @@ class BuildingInfo:
     def draw(self, screen: pygame.Surface) -> None:
         if self.building is None:
             return
-        lines = building_lines(self.building)
+        lines = building_lines(self.building, self.networks)
         surfaces = [(self.title_font if i == 0 else self.font).render(text, True, color)
                     for i, (text, color) in enumerate(lines)]
         width = max(s.get_width() for s in surfaces) + 2 * PADDING

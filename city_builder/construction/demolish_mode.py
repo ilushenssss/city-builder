@@ -20,8 +20,13 @@ import pygame
 
 from city_builder.economy.economy import Economy
 from city_builder.world.building import Building
-from city_builder.world.grid import Grid
+from city_builder.config import ROAD_CATEGORIES
+from city_builder.world.grid import Grid, Overlay
 from city_builder.world.tile import Tile
+
+# Что можно снести: здание (дом, дорогу) или элемент сети (линию, трубу, светофор).
+# У обоих есть .item — товар из каталога (название и цена для возврата денег).
+Target = Building | Overlay
 
 LEFT_BUTTON = 1
 RIGHT_BUTTON = 3
@@ -38,9 +43,10 @@ class DemolishMode:
         self.grid = grid
         self.economy = economy  # чтобы вернуть часть стоимости при сносе
         self.state = DemolishState.IDLE
-        self.hovered: Building | None = None  # здание под курсором (обновляется каждый кадр)
+        self.hovered: Target | None = None    # что под курсором (обновляется каждый кадр)
         self.hovered_tile: Tile | None = None  # клетка под курсором (для подсветки пустой клетки)
-        self.target: Building | None = None   # выбранное здание, ждёт подтверждения
+        self.target: Target | None = None     # что выбрано и ждёт подтверждения
+        self.show_pipes = False  # сносить и трубы (включается в режиме просмотра «Вода»)
 
     @property
     def active(self) -> bool:
@@ -68,20 +74,22 @@ class DemolishMode:
         """Клик по карте: выбрать здание под курсором для сноса."""
         if self.hovered is None:
             return  # под курсором пусто — сносить нечего
-        if self.state == DemolishState.CONFIRMING and self.hovered is self.target:
-            # Повторный клик по уже выбранному зданию — подтверждение
+        if self.state == DemolishState.CONFIRMING and self.hovered == self.target:
+            # Повторный клик по уже выбранному — подтверждение
             self.confirm()
             return
-        # «is» — это то же самое здание (а не просто такое же)
         self.target = self.hovered
         self.state = DemolishState.CONFIRMING
 
-    def confirm(self) -> Building | None:
-        """«Снести»: убираем здание с карты. Возвращает снесённое здание."""
+    def confirm(self) -> Target | None:
+        """«Снести»: убираем здание или элемент сети. Возвращает снесённое."""
         if self.state != DemolishState.CONFIRMING or self.target is None:
             return None
         building = self.target
-        self.grid.remove(building)
+        if isinstance(building, Overlay):
+            self.grid.remove_overlay(building)
+        else:
+            self.grid.remove(building)
         self.economy.refund(building.item)  # возвращаем часть цены (DEMOLISH_REFUND)
         self.target = None
         self.hovered = None
@@ -114,9 +122,19 @@ class DemolishMode:
         if not self.active:
             return
         self.hovered_tile = tile
-        # У большого здания каждая его клетка ссылается на само здание,
-        # поэтому навести можно на любую часть
-        self.hovered = picked or (tile.building if tile else None)
+        # Порядок: здание под курсором (не дорога) -> светофор/линия на клетке -> дорога -> труба.
+        # У большого здания каждая его клетка ссылается на само здание.
+        if picked is not None and picked.item.category not in ROAD_CATEGORIES:
+            self.hovered = picked
+            return
+        building = tile.building if tile else None
+        if building is not None and building.item.category not in ROAD_CATEGORIES:
+            self.hovered = building
+            return
+        overlay = self.grid.overlay_at(tile.x, tile.y, include_pipes=False) if tile else None
+        if overlay is None and tile is not None and building is None and self.show_pipes:
+            overlay = self.grid.overlay_at(tile.x, tile.y, include_pipes=True)
+        self.hovered = overlay or building or picked
 
     # --- Ввод ---
 

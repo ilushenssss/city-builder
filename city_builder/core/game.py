@@ -10,6 +10,8 @@ Game — «дирижёр». Сам почти ничего не делает, �
      ├── GameClock     — игровое время: пауза, скорость, когда делать тик
      ├── GoalTracker   — цель игры, победа и поражение
      ├── CitizenManager — человечки, которые ходят по дорогам по делам
+     ├── TrafficManager — машины на дорогах
+     ├── Effects       — дым, пыль, «вырастающие» здания, всплывающие числа, облака
      ├── Camera        — откуда мы смотрим на карту
      ├── InputHandler  — читает ввод, двигает Camera, ищет клетку в Grid
      ├── BuildMode     — строительство: выбранный товар, место, подтверждение
@@ -34,6 +36,7 @@ from city_builder.config import (
     WINDOW_WIDTH,
 )
 from city_builder.citizens.citizens import CitizenManager
+from city_builder.citizens.vehicles import TrafficManager
 from city_builder.construction.build_mode import BuildMode
 from city_builder.construction.demolish_mode import DemolishMode
 from city_builder.core.game_loop import GameLoop
@@ -44,6 +47,7 @@ from city_builder.economy.goals import GoalTracker
 from city_builder.input.input_handler import InputHandler
 from city_builder.render import iso
 from city_builder.render.camera import Camera
+from city_builder.render.effects import Effects
 from city_builder.render.images import ImageLibrary
 from city_builder.render.renderer import Renderer
 from city_builder.ui.ui_manager import UIManager
@@ -119,6 +123,8 @@ class Game:
         self.clock = GameClock()
         self.goals = GoalTracker(self.economy)
         self.citizens = CitizenManager(self.grid, self.economy)
+        self.traffic = TrafficManager(self.grid, self.economy)
+        self.effects = Effects(self.grid, self.economy)
 
         # --- Камера ---
         # Границы карты в мире (изометрический ромб) — камера не уедет за них
@@ -161,7 +167,7 @@ class Game:
     def update(self, dt: float) -> None:
         """Шаг 2 кадра: обновление состояния. dt — секунды с прошлого кадра."""
         mouse_pos = pygame.mouse.get_pos()
-        self.ui.update(mouse_pos)  # подсветка кнопок и карточек
+        self.ui.update(mouse_pos, dt)  # подсветка кнопок и карточек, баннер уровня
 
         if self.ui.blocks_world:
             # Меню открыто — карту не двигаем и клетку не подсвечиваем
@@ -182,21 +188,30 @@ class Game:
         # Подсказка о здании — только когда ничего не строим и не сносим
         idle = not (self.build.active or self.demolish.active or self.ui.blocks_world)
         self.ui.building_info.update(picked if idle else None, mouse_pos)
+        self.ui.building_info.networks = self.economy.infrastructure
 
         self.camera.clamp()    # после всех движений не даём камере уехать с карты
 
         # --- Экономика ---
         # Пересчёт статистики (только если что-то построили/снесли)
         self.economy.refresh()
+        # Игровое время: на паузе и на экране итогов — 0, на ×3 — втрое быстрее
+        game_dt = 0.0 if self.goals.finished else dt * self.clock.speed
+        # Эффекты: анимация постройки и всплывающие числа — в реальном времени,
+        # дым и облака — в игровом (на паузе замирают)
+        self.effects.update(dt, game_dt)
+
         if self.goals.finished:
             return  # игра окончена (экран итогов) — время стоит
 
-        # Жители ходят в игровом времени: на паузе стоят, на ×3 бегут втрое быстрее
-        self.citizens.update(dt * self.clock.speed)
+        # Жители и машины движутся в игровом времени
+        self.citizens.update(game_dt)
+        self.traffic.update(game_dt)
 
         # Часы говорят, сколько тиков пора сделать (обычно 0, иногда 1)
         for _ in range(self.clock.update(dt)):  # _ — переменная, которая не нужна
             self.economy.tick()
+            self.effects.on_tick()  # монетки дохода над предприятиями
             self.goals.on_tick()  # проверка победы и поражения
             if self.goals.finished:
                 # Игра только что закончилась: выключаем строительство, снос и меню,
@@ -208,7 +223,9 @@ class Game:
 
     def draw(self) -> None:
         """Шаг 3 кадра: отрисовка. Порядок важен — то, что рисуется позже, оказывается сверху."""
-        self.renderer.draw(self.grid, self.camera, self.citizens)  # карта, здания, жители
+        # Карта, здания, природа, машины, жители и эффекты
+        self.renderer.draw(self.grid, self.camera, self.citizens, self.traffic, self.effects,
+                           self.economy, self.ui.view)
         if self.build.active:
             self.renderer.draw_build_preview(self.build, self.camera)  # призрак здания
         elif self.demolish.active:

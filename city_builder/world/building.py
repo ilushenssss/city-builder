@@ -27,6 +27,13 @@ class Building:
     happiness: float = 0.0
     # Список проблем для значка и подсказки: "road", "power", "water", "inputs"
     problems: list[str] = field(default_factory=list)
+    # Номер электросети и водопроводной сети, к которым подключено здание (None — ни к какой).
+    # Нужны подсказке: «нет линии рядом» или «в сети не хватает энергии».
+    power_net: int | None = None
+    water_net: int | None = None
+    # Пробки по дороге на работу (только для домов): 1.0 — свободно, 2.0 — вдвое больше машин,
+    # чем дорога пропускает. Считает economy/traffic.py.
+    congestion: float = 0.0
 
     @property
     def working(self) -> bool:

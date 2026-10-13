@@ -32,6 +32,13 @@ PLACEMENT_WATER = "water"            # только на воде (наприм�
 PLACEMENT_NEAR_WATER = "near_water"  # на суше, но вплотную к воде (электростанция — для охлаждения)
 PLACEMENTS = (PLACEMENT_LAND, PLACEMENT_WATER, PLACEMENT_NEAR_WATER)
 
+# Слои «сетей» (поле "layer"): такие товары — не здания, а линии поверх/под клетками
+LAYER_POWER = "power"    # линия электропередач (тянется мышью)
+LAYER_PIPE = "pipe"      # водопровод под землёй (тянется мышью)
+LAYER_SIGNAL = "signal"  # светофор на перекрёстке
+LAYERS = (LAYER_POWER, LAYER_PIPE, LAYER_SIGNAL)
+MAX_LEVEL = 5
+
 
 class CatalogError(Exception):
     """Ошибка в файле каталога. Текст ошибки объясняет, что и где не так."""
@@ -88,6 +95,11 @@ class ShopItem:
     # --- Счастье (см. economy/happiness.py) ---
     happiness: int = 0        # влияние на счастье домов в радиусе: + (парк) или − (завод)
     radius: int = 0           # радиус влияния в клетках
+
+    # --- Прогресс и сети ---
+    level: int = 1            # с какого уровня города товар можно купить
+    layer: str | None = None  # None — здание; "power"/"pipe"/"signal" — сеть (см. LAYERS)
+    capacity: int = 0         # пропускная способность дороги (машин за тик)
 
 
 class Catalog:
@@ -190,6 +202,7 @@ def _parse_item(record: Any, index: int) -> ShopItem:
     non_negative = (("housing", 0), ("workers", 0), ("income", 0), ("floors", 1),
                     ("power_output", 0), ("power_use", 0), ("water_output", 0), ("water_use", 0),
                     ("storage", 0), ("radius", 0))
+    non_negative += (("capacity", 0),)
     for name, default in non_negative:
         value = _get(record, name, int, where, default=default)
         if value < 0:
@@ -199,6 +212,13 @@ def _parse_item(record: Any, index: int) -> ShopItem:
     numbers["happiness"] = _get(record, "happiness", int, where, default=0)
     if numbers["happiness"] and not numbers["radius"]:
         raise CatalogError(f'{where}: у "happiness" должен быть "radius" — на сколько клеток действует')
+
+    numbers["level"] = _get(record, "level", int, where, default=1)
+    if not 1 <= numbers["level"] <= MAX_LEVEL:
+        raise CatalogError(f'{where}: "level" должен быть от 1 до {MAX_LEVEL}')
+    numbers["layer"] = _get(record, "layer", str, where, default=None)
+    if numbers["layer"] is not None and numbers["layer"] not in LAYERS:
+        raise CatalogError(f'{where}: "layer" должен быть одним из {LAYERS}')
 
     # Производство и потребление ресурсов
     numbers["produces"] = _parse_resources(_get(record, "produces", dict, where, default={}), where, "produces")

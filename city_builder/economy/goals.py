@@ -1,6 +1,10 @@
-"""Цель игры, победа и поражение.
+"""Цель игры, уровни города, победа и поражение.
 
-  Победа:    население достигло GOAL_POPULATION (500 жителей).
+  Уровни:    LEVEL_POPULATION — сколько жителей нужно для уровня 1..5. С уровнем
+             открываются новые здания (поле "level" в shop.json). Уровень считается
+             по наибольшему населению за игру — если жители уехали, уровень не падает.
+
+  Победа:    население достигло GOAL_POPULATION (1000 жителей).
   Поражение: деньги в минусе BANKRUPTCY_TICKS тиков подряд (банкротство).
              Как только деньги снова >= 0, счётчик долга обнуляется.
 
@@ -12,7 +16,8 @@
 
 from enum import Enum, auto
 
-from city_builder.config import BANKRUPTCY_TICKS, GOAL_POPULATION
+from city_builder.config import BANKRUPTCY_TICKS, GOAL_POPULATION, LEVEL_POPULATION
+from city_builder.data.catalog import ShopItem
 from city_builder.economy.economy import Economy
 
 
@@ -29,6 +34,34 @@ class GoalTracker:
         self.outcome = Outcome.PLAYING
         self.debt_ticks = 0        # сколько тиков подряд деньги в минусе
         self.continued = False     # игрок выбрал «Продолжить» после победы
+        self.level = 1             # уровень города (1..5)
+        self.best_population = 0   # наибольшее население за игру
+        # Новый уровень, о котором ещё не сообщили игроку (баннер его «заберёт»)
+        self.pending_level_up: int | None = None
+
+    # --- Уровни ---
+
+    @property
+    def max_level(self) -> int:
+        return len(LEVEL_POPULATION)
+
+    @property
+    def next_level_population(self) -> int | None:
+        """Сколько жителей нужно для следующего уровня (None — уровень максимальный)."""
+        if self.level >= self.max_level:
+            return None
+        return LEVEL_POPULATION[self.level]
+
+    def is_unlocked(self, item: ShopItem) -> bool:
+        """Можно ли уже покупать этот товар."""
+        return item.level <= self.level
+
+    def _update_level(self) -> None:
+        self.best_population = max(self.best_population, self.economy.population)
+        level = sum(1 for need in LEVEL_POPULATION if self.best_population >= need)
+        if level > self.level:
+            self.level = level
+            self.pending_level_up = level  # баннер покажет «Уровень N! Открыто: ...»
 
     # --- Состояние ---
 
@@ -60,6 +93,7 @@ class GoalTracker:
     # --- Проверка после тика ---
 
     def on_tick(self) -> None:
+        self._update_level()  # уровень растёт и после победы
         if not self.active:
             return
 

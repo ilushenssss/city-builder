@@ -24,6 +24,7 @@ import pygame
 
 from city_builder.config import (
     ASSETS_DIR,
+    CAR_COLORS,
     FLAT_CATEGORIES,
     IMAGE_CACHE_LIMIT,
     IMAGE_SMOOTH_SCALING,
@@ -97,6 +98,41 @@ class ImageLibrary:
             self._generated[item.id] = surface.convert_alpha()
         return self._generated[item.id]
 
+    def road_sprite(self, item: ShopItem, mask: int) -> pygame.Surface:
+        """Вариант дороги под соседей (маска 0..15, см. iso_sprites.road_mask):
+        assets/roads/<id>/<маска>.png. Нет такого файла — обычный спрайт дороги."""
+        image = self.load(f"roads/{item.id}/{mask}.png")
+        return image if image is not None else self.sprite(item)
+
+    def _cached(self, key: str, draw) -> pygame.Surface:
+        """Нарисовать картинку функцией draw() один раз и дальше брать из кэша."""
+        if key not in self._generated:
+            self._generated[key] = draw().convert_alpha()
+        return self._generated[key]
+
+    def grass(self, variant: int) -> pygame.Surface:
+        """Вариант травы: assets/terrain/grass_<n>.png или нарисованный кодом."""
+        image = self.load(f"terrain/grass_{variant}.png")
+        if image is not None:
+            return image
+        return self._cached(f"grass:{variant}", lambda: iso_sprites.grass_tile(TILE_COLORS["grass"], variant))
+
+    def water(self, land_mask: int, frame: int) -> pygame.Surface:
+        """Клетка воды с берегом с тех сторон, где суша (land_mask), кадр анимации frame."""
+        return self._cached(f"water:{land_mask}:{frame}", lambda: iso_sprites.water_tile(land_mask, frame))
+
+    def decor(self, kind: str, variant: int) -> pygame.Surface:
+        """Природа: дерево, ёлка, куст, цветы, камень — несколько вариантов каждого."""
+        image = self.load(f"decor/{kind}_{variant}.png")
+        if image is not None:
+            return image
+        return self._cached(f"decor:{kind}:{variant}", lambda: iso_sprites.decor_sprite(kind, variant))
+
+    def car(self, color_index: int, along: str) -> pygame.Surface:
+        """Машина цвета CAR_COLORS[color_index], едет вдоль оси along ("x" или "y")."""
+        return self._cached(f"car:{color_index}:{along}",
+                            lambda: iso_sprites.car_sprite(CAR_COLORS[color_index], along))
+
     def terrain(self, name: str) -> pygame.Surface:
         """Ромб местности ("grass", "water"): PNG из assets/terrain/ или ровный ромб цвета."""
         image = self.load(f"terrain/{name}.png")
@@ -104,7 +140,8 @@ class ImageLibrary:
             return image
         key = f"terrain:{name}"
         if key not in self._generated:
-            self._generated[key] = iso_sprites.flat_tile(TILE_COLORS[name], noise=0.3).convert_alpha()
+            surface = iso_sprites.terrain_tile(TILE_COLORS[name], seed=1, kind=name)
+            self._generated[key] = surface.convert_alpha()
         return self._generated[key]
 
     # --- Масштабирование ---

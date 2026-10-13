@@ -21,7 +21,15 @@ Game общается только с UIManager, а не с каждой кно�
 
 import pygame
 
-from city_builder.config import COLOR_UI_DANGER_HOVER, MENU_BUTTON_SIZE, UI_BUTTON_GAP, UI_MARGIN
+from city_builder.config import (
+    COLOR_UI_DANGER_HOVER,
+    MENU_BUTTON_SIZE,
+    UI_BUTTON_GAP,
+    UI_MARGIN,
+    VIEW_POWER,
+    VIEW_TRAFFIC,
+    VIEW_WATER,
+)
 from city_builder.construction.build_mode import BuildMode
 from city_builder.construction.demolish_mode import DemolishMode
 from city_builder.data.catalog import Catalog
@@ -35,6 +43,8 @@ from city_builder.ui.button import ICON_DEMOLISH, ICON_EXIT, ICON_MENU, Button
 from city_builder.ui.city_panel import CityPanel
 from city_builder.ui.end_screen import EndScreen
 from city_builder.ui.goal_panel import GoalPanel
+from city_builder.ui.level_banner import LevelBanner
+from city_builder.ui.view_panel import ViewPanel
 from city_builder.ui.menu import Menu
 from city_builder.ui.resource_bar import ResourceBar
 
@@ -78,6 +88,9 @@ class UIManager:
         self.build_panel = BuildPanel(screen_size, build_mode, demolish_mode)
         self.resource_bar = ResourceBar(economy, clock)
         self.goal_panel = GoalPanel(goals)
+        self.view_panel = ViewPanel()
+        self.level_banner = LevelBanner(screen_size, goals, catalog)
+        self.menu.is_unlocked = goals.is_unlocked  # закрытые уровнем товары — с замком
         self.city_panel = CityPanel(economy)
         self.building_info = BuildingInfo(screen_size)
         self.end_screen = EndScreen(screen_size, goals, economy)
@@ -109,7 +122,8 @@ class UIManager:
         # any() — True, если хотя бы одна кнопка содержит курсор
         over_button = any(button.contains(pos) for button in self.buttons)
         over_panel = (self.build_panel.contains(pos) or self.resource_bar.contains(pos)
-                      or self.goal_panel.contains(pos) or self.city_panel.contains(pos))
+                      or self.goal_panel.contains(pos) or self.city_panel.contains(pos)
+                      or self.view_panel.contains(pos))
         return over_button or over_panel or self.blocks_world
 
     def handle_event(self, event: pygame.event.Event) -> bool:
@@ -138,6 +152,9 @@ class UIManager:
         # даже пока выбираешь товар в магазине
         if self.resource_bar.handle_event(event):
             return True
+        # Режимы просмотра (кнопки и F5–F8) — тоже всегда
+        if self.view_panel.handle_event(event):
+            return True
 
         # Дальше событие получает меню (если оно открыто).
         # «or» останавливается на первом True: если меню съело событие, дальше оно не идёт.
@@ -151,8 +168,18 @@ class UIManager:
 
         return self.build_panel.handle_event(event)
 
-    def update(self, mouse_pos: tuple[int, int]) -> None:
-        """Подсветка элементов под курсором."""
+    @property
+    def view(self) -> str:
+        """Текущий режим просмотра (обычный, свет, вода, пробки)."""
+        return self.view_panel.view
+
+    def update(self, mouse_pos: tuple[int, int], dt: float = 0.0) -> None:
+        """Подсветка элементов под курсором, раскладка панелей, баннер уровня."""
+        # Строим линию, трубу или светофор — сам включается нужный режим просмотра
+        layer = self.build_mode.item.layer if self.build_mode.active and self.build_mode.item else None
+        self.view_panel.auto_view = {"power": VIEW_POWER, "pipe": VIEW_WATER, "signal": VIEW_TRAFFIC}.get(layer or "")
+        # Трубы можно сносить, только когда их видно (режим «Вода»)
+        self.demolish_mode.show_pipes = self.view == VIEW_WATER
         # Кнопка сноса «горит», пока режим включён — видно, что он активен
         self.demolish_button.active = self.demolish_mode.active
         for button in self.buttons:
@@ -164,6 +191,8 @@ class UIManager:
         # Панель цели — сразу под панелью ресурсов (её ширина меняется, а левый край — нет)
         self.goal_panel.update((self.resource_bar.rect.left, self.resource_bar.rect.bottom + 6))
         self.city_panel.update((self.goal_panel.rect.left, self.goal_panel.rect.bottom + 6))
+        self.view_panel.update(mouse_pos, (self.city_panel.rect.left, self.city_panel.rect.bottom + 6))
+        self.level_banner.update(dt)
         self.end_screen.update(mouse_pos)
 
     def draw(self, screen: pygame.Surface) -> None:
@@ -174,6 +203,8 @@ class UIManager:
         # Панель цели — под меню: на невысоком экране она иначе закрыла бы заголовок меню
         self.goal_panel.draw(screen)
         self.city_panel.draw(screen)
+        self.view_panel.draw(screen)
+        self.level_banner.draw(screen)
         self.building_info.draw(screen)  # подсказка о здании — над картой, но под меню
         self.menu.draw(screen)
         self.resource_bar.draw(screen)

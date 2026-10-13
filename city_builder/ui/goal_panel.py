@@ -1,6 +1,8 @@
-"""Панель цели под панелью ресурсов: прогресс к победе и предупреждение о долге.
+"""Панель цели под панелью ресурсов: уровень города, прогресс к победе, долг.
 
     ┌────────────────────────────────────┐
+    │ Уровень 2 · до 3-го: 120 / 150     │  <- уровень и сколько жителей до следующего
+    │ ████████████░░░░░░░░░░░░░░░░░░░░░  │
     │ Цель: 500 жителей           24%    │
     │ ████████░░░░░░░░░░░░░░░░░░░░░░░░░  │  <- полоска прогресса
     │ Долг! Банкротство через 12 дн.     │  <- только если деньги в минусе (красным)
@@ -15,12 +17,14 @@ from city_builder.config import (
     COLOR_MENU_PANEL,
     COLOR_MONEY_NEGATIVE,
     COLOR_PROGRESS,
+    COLOR_PRICE,
     COLOR_PROGRESS_BG,
     COLOR_TEXT,
     COLOR_TEXT_DIM,
     COLOR_UI_BORDER,
     COLOR_VICTORY,
     GOAL_PANEL_WIDTH,
+    LEVEL_POPULATION,
     UI_BORDER_RADIUS,
 )
 from city_builder.economy.goals import GoalTracker, Outcome
@@ -43,7 +47,7 @@ class GoalPanel:
         """Панель стоит под панелью ресурсов — UIManager передаёт, где именно.
         Высота зависит от того, показывается ли строка про долг."""
         line_h = self.font.get_linesize()
-        height = PADDING + line_h + 6 + BAR_HEIGHT + PADDING
+        height = PADDING + 2 * (line_h + 6 + BAR_HEIGHT) + 6 + PADDING
         if self._debt_text():
             height += self.small_font.get_linesize() + 4
         self.rect = pygame.Rect(top_left, (GOAL_PANEL_WIDTH, height))
@@ -54,12 +58,35 @@ class GoalPanel:
             return None
         return f"Долг! Банкротство через {self.goals.ticks_until_bankruptcy} дн."
 
+    @staticmethod
+    def _bar(screen: pygame.Surface, x: int, y: int, width: int, progress: float, color) -> None:
+        """Полоска прогресса: серый фон и заполненная часть цвета color."""
+        pygame.draw.rect(screen, COLOR_PROGRESS_BG, (x, y, width, BAR_HEIGHT), border_radius=BAR_HEIGHT // 2)
+        filled = round(width * progress)
+        if filled > 0:
+            pygame.draw.rect(screen, color, (x, y, filled, BAR_HEIGHT), border_radius=BAR_HEIGHT // 2)
+
     def draw(self, screen: pygame.Surface) -> None:
         pygame.draw.rect(screen, COLOR_MENU_PANEL, self.rect, border_radius=UI_BORDER_RADIUS)
         pygame.draw.rect(screen, COLOR_UI_BORDER, self.rect, 1, border_radius=UI_BORDER_RADIUS)
         x = self.rect.left + PADDING
         y = self.rect.top + PADDING
         inner_w = self.rect.width - 2 * PADDING
+
+        # --- Уровень города и прогресс до следующего ---
+        goals = self.goals
+        need = goals.next_level_population
+        if need is None:
+            level_text = f"Уровень {goals.level} — максимальный"
+            level_progress = 1.0
+        else:
+            prev = LEVEL_POPULATION[goals.level - 1]
+            level_text = f"Уровень {goals.level} · до {goals.level + 1}-го: {goals.best_population} / {need}"
+            level_progress = max(0.0, min(1.0, (goals.best_population - prev) / (need - prev)))
+        screen.blit(self.font.render(level_text, True, COLOR_PRICE), (x, y))
+        y += self.font.get_linesize() + 6
+        self._bar(screen, x, y, inner_w, level_progress, COLOR_PRICE)
+        y += BAR_HEIGHT + 10
 
         # --- Строка 1: что за цель и процент ---
         if self.goals.outcome == Outcome.WON:
@@ -74,12 +101,7 @@ class GoalPanel:
         y += self.font.get_linesize() + 6
 
         # --- Строка 2: полоска прогресса ---
-        bar = pygame.Rect(x, y, inner_w, BAR_HEIGHT)
-        pygame.draw.rect(screen, COLOR_PROGRESS_BG, bar, border_radius=BAR_HEIGHT // 2)
-        filled = round(inner_w * self.goals.progress)
-        if filled > 0:
-            pygame.draw.rect(screen, COLOR_PROGRESS, (x, y, filled, BAR_HEIGHT),
-                             border_radius=BAR_HEIGHT // 2)
+        self._bar(screen, x, y, inner_w, self.goals.progress, COLOR_PROGRESS)
         y += BAR_HEIGHT + 4
 
         # --- Строка 3: долг (мигает: полсекунды виден, полсекунды тусклее) ---

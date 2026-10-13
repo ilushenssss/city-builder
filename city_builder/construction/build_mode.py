@@ -14,9 +14,13 @@
   DRAGGING   — только для дорог: кнопка мыши зажата, тянем дорогу от клетки к клетке.
   CONFIRMING — место (или участок дороги) выбрано, ждём «Построить» или «Отмена».
 
-Дорогу протягивают буквой «Г»: сначала вдоль той оси, по которой тянули дальше,
-потом поворот. Клетки, где дорога уже есть, пропускаются (бесплатно),
-клетки, где строить нельзя (вода, дом), — тоже пропускаются и подсвечиваются красным.
+Дороги, линии электропередач и водопровод протягивают буквой «Г»: сначала вдоль
+той оси, по которой тянули дальше, потом поворот. Клетки, где такое уже есть,
+пропускаются (бесплатно), клетки, где нельзя (вода, дом), — тоже пропускаются
+и подсвечиваются красным.
+
+Линии, трубы и светофоры — не здания, а «сети» (поле "layer" товара): они кладутся
+слоем на клетку (Grid.place_overlay) и проверяются своими правилами (Grid.overlay_error).
 
 После постройки режим возвращается в PLACING с тем же товаром:
 удобно ставить несколько домов или участков дороги подряд.
@@ -30,7 +34,7 @@ from enum import Enum, auto
 import pygame
 
 from city_builder.config import ROAD_CATEGORIES
-from city_builder.data.catalog import ShopItem
+from city_builder.data.catalog import LAYER_PIPE, LAYER_POWER, ShopItem
 from city_builder.economy.economy import Economy
 from city_builder.world.building import Building
 from city_builder.world.grid import Grid
@@ -103,8 +107,32 @@ class BuildMode:
 
     @property
     def draggable(self) -> bool:
-        """Можно ли товар протягивать мышью (дороги — да, здания — нет)."""
-        return self.item is not None and self.item.category in ROAD_CATEGORIES
+        """Можно ли товар протягивать мышью: дороги, линии и водопровод — да, здания — нет."""
+        return self.item is not None and (self.item.category in ROAD_CATEGORIES
+                                          or self.item.layer in (LAYER_POWER, LAYER_PIPE))
+
+    @property
+    def is_overlay(self) -> bool:
+        """Строим «сеть» (линию, трубу, светофор), а не здание."""
+        return self.item is not None and self.item.layer is not None
+
+    def _place_error(self, x: int, y: int) -> str | None:
+        """Почему сюда нельзя (без учёта денег): правила здания или сети."""
+        assert self.item is not None
+        if self.is_overlay:
+            return self.grid.overlay_error(self.item, x, y)
+        return self.grid.placement_error(self.item, x, y)
+
+    def _already_there(self, x: int, y: int) -> bool:
+        """При протягивании: такое здесь уже есть — пропустить бесплатно."""
+        tile = self.grid.get(x, y)
+        if tile is None or self.item is None:
+            return False
+        if self.item.layer == LAYER_POWER:
+            return tile.power_line is not None
+        if self.item.layer == LAYER_PIPE:
+            return tile.pipe is not None
+        return tile.building is not None and tile.building.item.category in ROAD_CATEGORIES
 
     @property
     def total_price(self) -> int:
@@ -134,7 +162,7 @@ class BuildMode:
     def site_error(self, x: int, y: int) -> str | None:
         """Почему здесь нельзя строить одно здание (None — можно): место или деньги."""
         assert self.item is not None
-        error = self.grid.placement_error(self.item, x, y)
+        error = self._place_error(x, y)
         if error:
             return error
         if not self.economy.can_afford(self.item.price):
@@ -144,6 +172,8 @@ class BuildMode:
     def site_warning(self, x: int, y: int) -> str | None:
         """Строить можно, но здание не будет работать — предупреждаем заранее."""
         assert self.item is not None
+        if self.is_overlay:
+            return None  # линиям, трубам и светофорам дорога и свет не нужны
         width, height = self.item.size
         if self.item.needs_road and not self.grid.site_has_road(x, y, width, height):
             return "Рядом нет дороги — здание не будет работать"
@@ -213,14 +243,19 @@ class BuildMode:
         if self.state != BuildState.CONFIRMING or not self.targets or self.item is None:
             return []
         # Проверяем ещё раз: пока игрок думал, место могло стать недоступным
-        valid = [site for site in self.targets if self.grid.placement_error(self.item, *site) is None]
+        valid = [site for site in self.targets if self._place_error(*site) is None]
         if not valid:
             self.reject()
             return []
         cost = len(valid) * self.item.price
         if not self.economy.spend(cost):
             return []  # денег не хватает — ждём (панель покажет ошибку)
-        built = [self.grid.place(self.item, *site) for site in valid]
+        if self.is_overlay:
+            for site in valid:
+                self.grid.place_overlay(self.item, *site)
+            built: list[Building] = []
+        else:
+            built = [self.grid.place(self.item, *site) for site in valid]
         self.targets = []
         self.state = BuildState.PLACING  # тот же товар — можно строить дальше
         return built
@@ -272,11 +307,9 @@ class BuildMode:
         assert self.item is not None and self.drag_start is not None
         self.drag_ok, self.drag_skip, self.drag_bad = [], [], []
         for site in l_shaped_path(self.drag_start, end):
-            tile = self.grid.get(*site)
-            if tile is not None and tile.building is not None \
-                    and tile.building.item.category in ROAD_CATEGORIES:
+            if self._already_there(*site):
                 self.drag_skip.append(site)
-            elif self.grid.placement_error(self.item, *site) is None:
+            elif self._place_error(*site) is None:
                 self.drag_ok.append(site)
             else:
                 self.drag_bad.append(site)

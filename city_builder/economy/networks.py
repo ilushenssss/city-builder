@@ -1,138 +1,231 @@
-"""Районы, электричество и вода.
+"""Электросети и водопровод.
 
-РАЙОН — это связная дорожная сеть: все клетки дороги, по которым можно доехать
-друг до друга. Здание относится к району той дороги, у которой стоит.
-Если в городе две несвязанные сети дорог — это два района, и у каждого
-своё электричество и своя вода (по дорогам «идут провода и трубы»).
+ЭЛЕКТРИЧЕСТВО
+-------------
+Ток идёт по ЛИНИЯМ ЭЛЕКТРОПЕРЕДАЧ (их тянут мышью) и ЧЕРЕЗ ЗДАНИЯ, стоящие вплотную:
+    станция ═══ линия ═══ дом|дом|дом      ← дома вплотную передают ток друг другу
+Всё, что так связано, — одна ЭЛЕКТРОСЕТЬ. У каждой сети свой баланс:
+  1. Складываем выработку станций сети (power_output). Станция должна работать
+     (у дороги — нужны работники) и касаться линии или здания сети.
+  2. Раздаём энергию зданиям сети в порядке постройки, пока хватает.
+  3. Кому не хватило — сидят без света и НЕ работают («гаснут» последние).
+Дороги ток не проводят (но линию можно тянуть над дорогой).
 
-    ═══════╗          ╔═══     ← два района: левый и правый
-     дома  ║  трава   ║ завод    электростанция левого района
-    ═══════╝          ╚═══     не питает завод в правом
+ВОДА
+----
+Вода идёт по ВОДОПРОВОДУ — подземным трубам (их тоже тянут мышью, хоть под зданиями).
+Связанные трубы — одна водопроводная сеть. Сеть снабжает здания, у которых хоть одна
+клетка не дальше PIPE_RADIUS (2) клеток от трубы. Водокачка подключена, если её
+клетки касаются трубы (или труба проходит под ней). Водокачке нужен свет — сначала
+считаем электричество, потом воду.
 
-Как распределяется электричество в районе:
-  1. Складываем выработку всех электростанций района (power_output).
-  2. Идём по зданиям в порядке постройки и раздаём им power_use, пока хватает.
-  3. Кому не хватило — сидят без света и НЕ работают.
-  Получается, что при нехватке «гаснут» здания, построенные последними.
-
-С водой — так же, но водокачке самой нужно электричество: обесточенная
-водонапорная башня воду не даёт. Поэтому сначала считаем свет, потом воду.
+Алгоритм «кто с кем связан» — система непересекающихся множеств (union-find):
+каждый узел сначала сам по себе; соединяя соседей, сливаем их множества.
+В конце узлы с одинаковым «корнем» — одна сеть.
 """
 
 from collections import deque
 from dataclasses import dataclass
 
+from city_builder.config import PIPE_RADIUS, ROAD_CATEGORIES
 from city_builder.world.building import Building
 from city_builder.world.grid import Grid
 
 
 @dataclass
-class District:
-    """Один район (дорожная сеть) и его баланс энергии и воды."""
+class Network:
+    """Одна электросеть или водопроводная сеть и её баланс."""
     id: int
-    power_supply: int = 0   # сколько электричества вырабатывается
-    power_demand: int = 0   # сколько хотят потребить все здания района
-    power_used: int = 0     # сколько реально раздали
-    water_supply: int = 0
-    water_demand: int = 0
-    water_used: int = 0
+    supply: int = 0   # сколько вырабатывается
+    demand: int = 0   # сколько хотят потребить все здания сети
+    used: int = 0     # сколько реально раздали
 
     @property
-    def power_spare(self) -> int:
-        """Свободное электричество — хватит ли на ещё одно здание."""
-        return self.power_supply - self.power_used
+    def spare(self) -> int:
+        """Свободный запас — хватит ли ещё на одно здание."""
+        return self.supply - self.used
 
-    @property
-    def water_spare(self) -> int:
-        return self.water_supply - self.water_used
+
+class UnionFind:
+    """Система непересекающихся множеств: find(a) — «корень» множества a, union(a, b) — слить."""
+
+    def __init__(self) -> None:
+        self.parent: dict = {}
+
+    def find(self, a):
+        self.parent.setdefault(a, a)
+        while self.parent[a] != a:
+            self.parent[a] = self.parent[self.parent[a]]  # «сжатие пути» — ускоряет следующие поиски
+            a = self.parent[a]
+        return a
+
+    def union(self, a, b) -> None:
+        self.parent[self.find(a)] = self.find(b)
+
+
+def is_structure(b: Building) -> bool:
+    """Здания, которые участвуют в сетях (дороги — нет)."""
+    return b.item.category not in ROAD_CATEGORIES
 
 
 class Infrastructure:
     def __init__(self, grid: Grid) -> None:
         self.grid = grid
-        self.road_district: dict[tuple[int, int], int] = {}  # клетка дороги -> номер района
-        self.districts: dict[int, District] = {}
+        self.power: dict[int, Network] = {}
+        self.water: dict[int, Network] = {}
+        self._power_of_tile: dict[tuple[int, int], int] = {}   # клетка линии/здания -> сеть
+        self._water_cover: dict[tuple[int, int], list[int]] = {}  # клетка -> водопроводные сети рядом
 
     def recompute(self) -> None:
-        """Пересчитать районы, свет и воду. Вызывается после постройки/сноса."""
-        self._label_districts()
-        buildings = self.grid.buildings
-        district_of = {b: self.district_of(b) for b in buildings}
+        """Пересчитать сети, свет и воду. Вызывается после постройки/сноса."""
+        buildings = [b for b in self.grid.buildings if is_structure(b)]
+        for b in self.grid.buildings:
+            b.powered = b.watered = True  # дорогам ничего не нужно
+            b.power_net = b.water_net = None
+        self._compute_power(buildings)
+        self._compute_water(buildings)
 
-        # --- Электричество ---
+    # --- Электричество ---
+
+    def _compute_power(self, buildings: list[Building]) -> None:
+        grid = self.grid
+        uf = UnionFind()
+        lines = {(t.x, t.y) for t in grid if t.power_line is not None}
+        for x, y in lines:  # линия соединяется с соседними линиями
+            uf.find(("L", x, y))
+            for nxt in ((x + 1, y), (x, y + 1)):
+                if nxt in lines:
+                    uf.union(("L", x, y), ("L", *nxt))
+        owner = {}  # клетка -> здание на ней
         for b in buildings:
-            if b.item.power_output and b.connected and district_of[b] is not None:
-                self.districts[district_of[b]].power_supply += b.item.power_output
-        for b in buildings:  # в порядке постройки: старые здания получают свет первыми
-            b.powered = self._give(b.item.power_use, district_of[b], "power")
+            for cell in b.footprint():
+                owner[cell] = b
+        for b in buildings:  # здание соединяется с линиями и зданиями вплотную
+            node = ("B", id(b))
+            uf.find(node)
+            for cell in grid._around(b.x, b.y, b.width, b.height):
+                if cell in lines:
+                    uf.union(node, ("L", *cell))
+                elif cell in owner and owner[cell] is not b:
+                    uf.union(node, ("B", id(owner[cell])))
 
-        # --- Вода (водокачкам нужно электричество, поэтому — после света) ---
+        # Корни -> номера сетей 0, 1, 2...
+        ids: dict = {}
+        self.power = {}
+        self._power_of_tile = {}
+
+        def net_of(node) -> int:
+            root = uf.find(node)
+            if root not in ids:
+                ids[root] = len(ids)
+                self.power[ids[root]] = Network(ids[root])
+            return ids[root]
+
+        for x, y in lines:
+            self._power_of_tile[(x, y)] = net_of(("L", x, y))
         for b in buildings:
-            if b.item.water_output and b.connected and b.powered and district_of[b] is not None:
-                self.districts[district_of[b]].water_supply += b.item.water_output
+            b.power_net = net_of(("B", id(b)))
+            for cell in b.footprint():
+                self._power_of_tile[cell] = b.power_net
+
+        # Выработка: станция работает, если у дороги (ей нужны работники)
         for b in buildings:
-            b.watered = self._give(b.item.water_use, district_of[b], "water")
+            if b.item.power_output and (b.connected or not b.item.needs_road):
+                self.power[b.power_net].supply += b.item.power_output
+        # Раздача в порядке постройки (старые здания — первыми)
+        for b in buildings:
+            b.powered = self._give(self.power, b.power_net, b.item.power_use)
 
-    def _give(self, amount: int, district_id: int | None, kind: str) -> bool:
-        """Выдать зданию amount энергии или воды из его района. True — хватило."""
-        if amount == 0:
-            return True  # зданию это не нужно
-        if district_id is None:
-            return False  # здание не у дороги — не подключено ни к какому району
-        district = self.districts[district_id]
-        setattr(district, f"{kind}_demand", getattr(district, f"{kind}_demand") + amount)
-        used = getattr(district, f"{kind}_used")
-        if getattr(district, f"{kind}_supply") - used >= amount:
-            setattr(district, f"{kind}_used", used + amount)
-            return True
-        return False
+    # --- Вода ---
 
-    # --- Районы ---
-
-    def _label_districts(self) -> None:
-        """Разметить клетки дорог номерами районов (поиск в ширину от каждой
-        ещё не размеченной клетки дороги — получается «заливка» сети)."""
-        self.road_district = {}
-        self.districts = {}
-        roads = {(b.x, b.y) for b in self.grid.buildings if self.grid.is_road(b.x, b.y)}
-        next_id = 0
-        for start in sorted(roads):  # sorted — чтобы номера районов не скакали
-            if start in self.road_district:
+    def _compute_water(self, buildings: list[Building]) -> None:
+        grid = self.grid
+        pipes = {(t.x, t.y) for t in grid if t.pipe is not None}
+        # Сети труб — заливкой (поиск в ширину) по соседним трубам
+        self.water = {}
+        net_of_pipe: dict[tuple[int, int], int] = {}
+        for start in sorted(pipes):
+            if start in net_of_pipe:
                 continue
-            self.districts[next_id] = District(next_id)
-            self.road_district[start] = next_id
+            net = len(self.water)
+            self.water[net] = Network(net)
+            net_of_pipe[start] = net
             queue = deque([start])
             while queue:
                 x, y = queue.popleft()
                 for nxt in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
-                    if nxt in roads and nxt not in self.road_district:
-                        self.road_district[nxt] = next_id
+                    if nxt in pipes and nxt not in net_of_pipe:
+                        net_of_pipe[nxt] = net
                         queue.append(nxt)
-            next_id += 1
+        # Зона покрытия: клетки в радиусе PIPE_RADIUS от трубы
+        self._water_cover = {}
+        r = PIPE_RADIUS
+        for (x, y), net in net_of_pipe.items():
+            for dy in range(-r, r + 1):
+                for dx in range(-r, r + 1):
+                    nets = self._water_cover.setdefault((x + dx, y + dy), [])
+                    if net not in nets:
+                        nets.append(net)
 
-    def districts_near(self, x: int, y: int, width: int, height: int) -> list[District]:
-        """Районы, к дорогам которых примыкает область (обычно один)."""
-        ids = set()
-        for tx, ty in self.grid._around(x, y, width, height):
-            if (tx, ty) in self.road_district:
-                ids.add(self.road_district[(tx, ty)])
-        return [self.districts[i] for i in sorted(ids)]
+        # Водокачки: касаются трубы (или труба под ними), работают и есть свет
+        for b in buildings:
+            if not b.item.water_output or not b.powered or not (b.connected or not b.item.needs_road):
+                continue
+            cells = list(b.footprint()) + grid._around(b.x, b.y, b.width, b.height)
+            nets = {net_of_pipe[c] for c in cells if c in net_of_pipe}
+            for net in nets:  # одна водокачка может питать несколько сетей — делим поровну
+                self.water[net].supply += b.item.water_output // len(nets)
 
-    def district_of(self, building: Building) -> int | None:
-        """Номер района здания (если примыкает к нескольким — берём первый)."""
-        near = self.districts_near(building.x, building.y, building.width, building.height)
-        return near[0].id if near else None
+        # Раздача: здание берёт воду из той сети рядом, где больше всего запас
+        for b in buildings:
+            nets = self.water_nets_near(b.x, b.y, b.width, b.height)
+            best = max(nets, key=lambda n: n.spare) if nets else None
+            b.water_net = best.id if best else None
+            b.watered = self._give(self.water, b.water_net, b.item.water_use)
+
+    @staticmethod
+    def _give(networks: dict[int, Network], net_id: int | None, amount: int) -> bool:
+        """Выдать зданию amount из сети. True — хватило (или зданию это не нужно)."""
+        if amount == 0:
+            return True
+        if net_id is None:
+            return False
+        net = networks[net_id]
+        net.demand += amount
+        if net.spare >= amount:
+            net.used += amount
+            return True
+        return False
+
+    # --- Для подсказок при строительстве ---
+
+    def power_nets_near(self, x: int, y: int, width: int, height: int) -> list[Network]:
+        """Электросети, к которым подключится здание в этом месте (касается линии или здания)."""
+        ids = {self._power_of_tile[c] for c in self.grid._around(x, y, width, height) if c in self._power_of_tile}
+        return [self.power[i] for i in sorted(ids)]
+
+    def water_nets_near(self, x: int, y: int, width: int, height: int) -> list[Network]:
+        """Водопроводные сети, в зону которых попадает область."""
+        ids: set[int] = set()
+        for ty in range(y, y + height):
+            for tx in range(x, x + width):
+                ids.update(self._water_cover.get((tx, ty), []))
+        return [self.water[i] for i in sorted(ids)]
+
+    def is_watered_tile(self, x: int, y: int) -> bool:
+        """Покрыта ли клетка водопроводом (для режима просмотра «Вода»)."""
+        return (x, y) in self._water_cover
 
     # --- Итоги по городу (для панели) ---
 
-    def totals(self) -> District:
-        """Сумма по всем районам — для панели «Город»."""
-        total = District(-1)
-        for d in self.districts.values():
-            total.power_supply += d.power_supply
-            total.power_demand += d.power_demand
-            total.power_used += d.power_used
-            total.water_supply += d.water_supply
-            total.water_demand += d.water_demand
-            total.water_used += d.water_used
-        return total
+    def totals(self) -> tuple[Network, Network]:
+        """(электричество, вода) — суммы по всем сетям, для панели «Город»."""
+        result = []
+        for networks in (self.power, self.water):
+            total = Network(-1)
+            for net in networks.values():
+                total.supply += net.supply
+                total.demand += net.demand
+                total.used += net.used
+            result.append(total)
+        return result[0], result[1]

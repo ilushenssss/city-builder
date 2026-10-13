@@ -138,12 +138,28 @@ class Card:
         self.opens = opens              # id страницы меню, которую открывает клик
         self.item_id = item_id          # id товара из каталога (для покупки)
         self.hovered = False            # курсор над карточкой — подсвечиваем её
+        # Товар ещё закрыт: нужен этот уровень города (None — открыт). Меню обновляет каждый кадр.
+        self.locked_level: int | None = None
 
     def contains(self, pos: tuple[int, int]) -> bool:
         return self.rect.collidepoint(pos)
 
     def update(self, mouse_pos: tuple[int, int]) -> None:
-        self.hovered = self.contains(mouse_pos)
+        self.hovered = self.contains(mouse_pos) and self.locked_level is None
+
+    def _draw_lock(self, screen: pygame.Surface, fonts: "CardFonts") -> None:
+        """Закрытый товар: затемнение, замок и «Уровень N» по центру карточки."""
+        shade_layer = pygame.Surface(self.rect.size, pygame.SRCALPHA)
+        pygame.draw.rect(shade_layer, (15, 18, 24, 170), shade_layer.get_rect(), border_radius=UI_BORDER_RADIUS)
+        screen.blit(shade_layer, self.rect)
+        cx, cy = self.rect.centerx, self.rect.centery - 14
+        body = pygame.Rect(0, 0, 30, 24)
+        body.center = (cx, cy + 8)
+        pygame.draw.circle(screen, (200, 200, 205), (cx, cy - 4), 10, 4)   # дужка
+        pygame.draw.rect(screen, (200, 200, 205), body, border_radius=4)     # корпус
+        pygame.draw.circle(screen, (60, 60, 70), (cx, cy + 6), 3)            # скважина
+        text = fonts.title.render(f"Уровень {self.locked_level}", True, (235, 235, 240))
+        screen.blit(text, text.get_rect(midtop=(cx, cy + 26)))
 
     def draw(self, screen: pygame.Surface, fonts: CardFonts) -> None:
         # --- Фон и рамка ---
@@ -215,3 +231,6 @@ class Card:
         if self.badge:
             text = fonts.footer.render(self.badge, True, COLOR_TEXT_DIM)
             screen.blit(text, text.get_rect(bottomright=inner.bottomright))
+
+        if self.locked_level is not None:
+            self._draw_lock(screen, fonts)

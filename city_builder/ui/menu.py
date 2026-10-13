@@ -160,6 +160,9 @@ class Menu:
         # кто передал функцию (UIManager включит режим строительства).
         # Такой приём называется «обратный вызов» (callback).
         self.on_item_selected = on_item_selected
+        self.catalog = catalog
+        # Функция «открыт ли товар» (от GoalTracker). None — всё открыто.
+        self.is_unlocked: Callable[[ShopItem], bool] | None = None
         screen_w, screen_h = screen_size
 
         # --- Размер панели ---
@@ -355,9 +358,9 @@ class Menu:
                 if card.contains(pos):
                     if card.opens:
                         self.open_page(card.opens)
-                    elif card.item_id:
+                    elif card.item_id and card.locked_level is None:
                         # Товар выбран: закрываем меню, чтобы было видно карту,
-                        # и сообщаем, какой товар выбран
+                        # и сообщаем, какой товар выбран (закрытые уровнем — не выбираются)
                         self.close()
                         self.on_item_selected(card.item_id)
                     break  # карточки не пересекаются — дальше искать незачем
@@ -369,6 +372,10 @@ class Menu:
         self.close_button.update(mouse_pos)
         self.back_button.update(mouse_pos)
         for card in self.current_page.cards:
+            # Закрыт ли товар уровнем города — проверяем каждый кадр (уровень растёт)
+            if card.item_id and self.is_unlocked is not None:
+                item = self.catalog.get_item(card.item_id)
+                card.locked_level = None if self.is_unlocked(item) else item.level
             card.update(mouse_pos)
 
     # --- Отрисовка ---

@@ -9,8 +9,26 @@ import random
 from collections.abc import Iterator
 
 from city_builder.config import ROAD_CATEGORIES
-from city_builder.data.catalog import PLACEMENT_NEAR_WATER, PLACEMENT_WATER, ShopItem
+from dataclasses import dataclass
+
+from city_builder.data.catalog import (
+    LAYER_PIPE,
+    LAYER_POWER,
+    LAYER_SIGNAL,
+    PLACEMENT_NEAR_WATER,
+    PLACEMENT_WATER,
+    ShopItem,
+)
 from city_builder.world.building import Building
+
+
+@dataclass(frozen=True)
+class Overlay:
+    """Элемент сети на клетке (линия, труба, светофор) — например, чтобы его снести."""
+    x: int
+    y: int
+    layer: str       # LAYER_POWER / LAYER_PIPE / LAYER_SIGNAL
+    item: ShopItem
 from city_builder.world.tile import Tile, TileType
 
 
@@ -63,6 +81,8 @@ class Grid:
                     return "Здание выходит за край карты"
                 if tile.building is not None:
                     return f"Место занято: {tile.building.item.name}"
+                if tile.power_line is not None and item.category not in ROAD_CATEGORIES:
+                    return "Мешает линия электропередач — сначала снесите её"
                 is_water = tile.type == TileType.WATER
                 if needs_water and not is_water:
                     return f"{item.name}: строится только на воде"
@@ -91,6 +111,7 @@ class Grid:
         building = Building(item, x, y)
         for tx, ty in building.footprint():
             self.tiles[ty][tx].building = building
+            self.tiles[ty][tx].decor = None  # деревья и кусты на участке вырубаются
         self.buildings.append(building)
         self.version += 1
         return building
@@ -99,8 +120,77 @@ class Grid:
         """Снести здание: освободить все его клетки и убрать из списка."""
         for tx, ty in building.footprint():
             self.tiles[ty][tx].building = None
+            self.tiles[ty][tx].signal = None  # снесли перекрёсток — светофор тоже
         self.buildings.remove(building)
         self.version += 1
+
+    # --- Сети: линии, трубы, светофоры ---
+
+    def overlay_error(self, item: ShopItem, x: int, y: int) -> str | None:
+        """Можно ли положить элемент сети (item.layer) на клетку. None — можно."""
+        tile = self.get(x, y)
+        if tile is None:
+            return "За краем карты"
+        if item.layer == LAYER_POWER:
+            if tile.type == TileType.WATER:
+                return "Линию нельзя тянуть над водой"
+            if tile.building is not None and tile.building.item.category not in ROAD_CATEGORIES:
+                return f"Мешает здание: {tile.building.item.name}"
+            if tile.power_line is not None:
+                return "Здесь уже есть линия"
+        elif item.layer == LAYER_PIPE:
+            if tile.type == TileType.WATER:
+                return "Водопровод нельзя класть под воду"
+            if tile.pipe is not None:
+                return "Здесь уже есть водопровод"
+        elif item.layer == LAYER_SIGNAL:
+            if not self.is_road(x, y):
+                return "Светофор ставится на дорогу"
+            if not self.is_intersection(x, y):
+                return "Светофор нужен на перекрёстке (3–4 дороги сходятся)"
+            if tile.signal is not None:
+                return "Здесь уже есть светофор"
+        return None
+
+    def place_overlay(self, item: ShopItem, x: int, y: int) -> None:
+        """Положить элемент сети на клетку (перед этим — проверить overlay_error)."""
+        tile = self.tiles[y][x]
+        if item.layer == LAYER_POWER:
+            tile.power_line = item
+            tile.decor = None  # под линией вырубаем деревья
+        elif item.layer == LAYER_PIPE:
+            tile.pipe = item
+        else:
+            tile.signal = item
+        self.version += 1
+
+    def remove_overlay(self, overlay: "Overlay") -> None:
+        tile = self.tiles[overlay.y][overlay.x]
+        setattr(tile, {LAYER_POWER: "power_line", LAYER_PIPE: "pipe", LAYER_SIGNAL: "signal"}[overlay.layer], None)
+        self.version += 1
+
+    def overlay_at(self, x: int, y: int, include_pipes: bool) -> "Overlay | None":
+        """Верхний элемент сети на клетке: светофор, потом линия, потом (если надо) труба."""
+        tile = self.get(x, y)
+        if tile is None:
+            return None
+        for layer, item in ((LAYER_SIGNAL, tile.signal), (LAYER_POWER, tile.power_line),
+                            (LAYER_PIPE, tile.pipe if include_pipes else None)):
+            if item is not None:
+                return Overlay(x, y, layer, item)
+        return None
+
+    def overlays(self) -> Iterator["Overlay"]:
+        """Все элементы сетей на карте (для содержания и подсчётов)."""
+        for tile in self:
+            for layer, item in ((LAYER_POWER, tile.power_line), (LAYER_PIPE, tile.pipe), (LAYER_SIGNAL, tile.signal)):
+                if item is not None:
+                    yield Overlay(tile.x, tile.y, layer, item)
+
+    def is_intersection(self, x: int, y: int) -> bool:
+        """Перекрёсток: клетка дороги, к которой примыкают 3 или 4 другие дороги."""
+        neighbours = ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1))
+        return self.is_road(x, y) and sum(self.is_road(*n) for n in neighbours) >= 3
 
     # --- Дороги ---
 
@@ -175,7 +265,7 @@ class Grid:
             yield from row  # отдаём по одной все клетки строки
 
     def generate(self, seed: int | None = None) -> None:
-        """Простая генерация карты: одно озеро и одна извилистая река.
+        """Генерация карты: озеро, извилистая река, леса и природа на свободной земле.
 
         seed — «зерно» случайности. Одинаковый seed даёт одинаковую карту
         (удобно для отладки). None — каждый раз новая карта.
@@ -206,3 +296,26 @@ class Grid:
             # или идёт прямо (0). Ноль указан дважды — прямо она идёт чаще.
             # max/min не дают реке выйти за край карты.
             x = max(0, min(self.width - 2, x + rng.choice((-1, 0, 0, 1))))
+
+        self._generate_nature(rng)
+
+    def _generate_nature(self, rng: random.Random) -> None:
+        """Леса (сгустки деревьев) и случайные деревья, кусты, цветы, камни на траве."""
+        from city_builder.config import FOREST_COUNT, FOREST_RADIUS, GRASS_VARIANTS, SCATTER_CHANCE
+
+        for tile in self:
+            tile.variant = rng.randrange(GRASS_VARIANTS)
+
+        # Леса: чем ближе к центру массива, тем гуще; в лесу больше ёлок
+        for _ in range(FOREST_COUNT):
+            cx, cy = rng.randrange(self.width), rng.randrange(self.height)
+            radius = rng.randint(*FOREST_RADIUS)
+            for tile in self:
+                dist = ((tile.x - cx) ** 2 + (tile.y - cy) ** 2) ** 0.5
+                if tile.type == TileType.GRASS and dist <= radius and rng.random() < 0.85 - dist / radius * 0.6:
+                    tile.decor = rng.choice(("pine", "pine", "tree", "bush"))
+
+        # Отдельные деревья, кусты, цветы и камни по всей карте
+        for tile in self:
+            if tile.type == TileType.GRASS and tile.decor is None and rng.random() < SCATTER_CHANCE:
+                tile.decor = rng.choice(("tree", "tree", "bush", "flowers", "flowers", "rock"))
