@@ -63,6 +63,29 @@ class CardFonts:
         )
 
 
+def wrap_parts(text: str, font: pygame.font.Font, max_width: int) -> list[str]:
+    """Перенос строки характеристик «по смыслу»: только по разделителям « · » и после «→»,
+    чтобы не оставалось висящих «·» и одиноких чисел. Кусок длиннее строки — обычный перенос."""
+    # Режем на куски: «Энергия −25 · Вода −10» -> ["Энергия −25", "Вода −10"],
+    # «Древесина 6 → Товары 12» -> ["Древесина 6 →", "Товары 12"]
+    parts = text.replace(" → ", " →\n").replace(" · ", "\n").split("\n")
+    lines: list[str] = []
+    current = ""
+    for part in parts:
+        joiner = " " if current.endswith("→") else " · "
+        candidate = f"{current}{joiner}{part}" if current else part
+        if font.size(candidate)[0] <= max_width:
+            current = candidate
+        else:
+            if current:
+                lines.append(current)
+            current = part
+    if current:
+        lines.append(current)
+    # Если кусок сам по себе не влез — переносим его по словам
+    return [piece for line in lines for piece in wrap_text(line, font, max_width)]
+
+
 def wrap_text(text: str, font: pygame.font.Font, max_width: int) -> list[str]:
     """Разбить текст на строки, чтобы каждая помещалась в max_width пикселей.
 
@@ -166,16 +189,21 @@ class Card:
         #    чтобы описание знало, где остановиться.
         footer_top = inner.bottom - fonts.footer.get_height()
         # Каждую строку характеристик тоже переносим, если она не влезает по ширине
-        details_lines = [part for line in self.details for part in wrap_text(line, fonts.text, inner.width)]
+        details_lines = [part for line in self.details for part in wrap_parts(line, fonts.text, inner.width)]
         details_top = footer_top - 6 - len(details_lines) * line_height
         for i, line in enumerate(details_lines):
             text = fonts.text.render(line, True, COLOR_DETAILS)
             screen.blit(text, text.get_rect(midtop=(inner.centerx, details_top + i * line_height)))
 
         # 4. Описание — сколько строк поместится до характеристик
-        for line in wrap_text(self.description, fonts.text, inner.width):
-            if y + line_height > details_top - 4:
-                break  # не помещается — остальное не рисуем, чтобы не залезть на цену
+        desc_lines = wrap_text(self.description, fonts.text, inner.width)
+        fits = max(0, int((details_top - 4 - y) // line_height))  # сколько строк влезает
+        if len(desc_lines) > fits:
+            # Не помещается целиком — показываем сколько можно и ставим многоточие
+            desc_lines = desc_lines[:fits]
+            if desc_lines:
+                desc_lines[-1] = desc_lines[-1].rstrip(" ,.") + "…"
+        for line in desc_lines:
             text = fonts.text.render(line, True, COLOR_TEXT_DIM)
             screen.blit(text, text.get_rect(midtop=(inner.centerx, y)))
             y += line_height

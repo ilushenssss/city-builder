@@ -92,7 +92,10 @@
       "price": 50,
       "upkeep": 1,
       "housing": 6,
+      "power_use": 2,
+      "water_use": 2,
       "size": [1, 1],
+      "floors": 1,
       "color": [200, 160, 90],
       "description": "Жильё для небольшой семьи"
     },
@@ -103,7 +106,10 @@
       "price": 120,
       "upkeep": 2,
       "housing": 10,
+      "power_use": 3,
+      "water_use": 3,
       "size": [1, 1],
+      "floors": 2,
       "color": [180, 110, 80],
       "description": "Просторный дом с участком"
     },
@@ -114,7 +120,10 @@
       "price": 400,
       "upkeep": 5,
       "housing": 40,
+      "power_use": 12,
+      "water_use": 12,
       "size": [2, 2],
+      "floors": 6,
       "color": [160, 160, 180],
       "description": "Много жителей на небольшой площади"
     },
@@ -125,7 +134,10 @@
       "price": 1000,
       "upkeep": 12,
       "housing": 100,
+      "power_use": 30,
+      "water_use": 30,
       "size": [2, 2],
+      "floors": 14,
       "color": [120, 170, 210],
       "description": "Огромный жилой комплекс"
     },
@@ -138,7 +150,10 @@
       "upkeep": 1,
       "workers": 2,
       "income": 4,
+      "power_use": 2,
+      "consumes": {"goods": 1},
       "size": [1, 1],
+      "floors": 1,
       "color": [230, 200, 120],
       "description": "Маленькая торговая точка"
     },
@@ -150,7 +165,11 @@
       "upkeep": 2,
       "workers": 6,
       "income": 12,
+      "power_use": 5,
+      "water_use": 1,
+      "consumes": {"goods": 3},
       "size": [1, 1],
+      "floors": 1,
       "color": [100, 160, 230],
       "description": "Продаёт товары жителям"
     },
@@ -162,9 +181,12 @@
       "upkeep": 4,
       "workers": 20,
       "income": 30,
+      "power_use": 15,
+      "water_use": 4,
       "size": [2, 2],
+      "floors": 5,
       "color": [140, 180, 200],
-      "description": "Рабочие места для горожан"
+      "description": "Рабочие места без товаров и сырья"
     },
     {
       "id": "mall",
@@ -174,9 +196,13 @@
       "upkeep": 8,
       "workers": 30,
       "income": 60,
+      "power_use": 25,
+      "water_use": 5,
+      "consumes": {"goods": 8},
       "size": [2, 2],
+      "floors": 2,
       "color": [70, 110, 190],
-      "description": "Привлекает покупателей со всего города"
+      "description": "Продаёт много товаров"
     },
 
     {
@@ -187,9 +213,13 @@
       "upkeep": 1,
       "workers": 4,
       "income": 8,
+      "power_use": 3,
+      "water_use": 6,
+      "produces": {"food": 12},
       "size": [2, 2],
+      "floors": 1,
       "color": [170, 200, 90],
-      "description": "Производит еду"
+      "description": "Выращивает еду для жителей"
     },
     {
       "id": "sawmill",
@@ -199,9 +229,14 @@
       "upkeep": 2,
       "workers": 8,
       "income": 14,
+      "power_use": 6,
+      "produces": {"wood": 8},
+      "happiness": -10,
+      "radius": 3,
       "size": [1, 1],
+      "floors": 1,
       "color": [140, 100, 60],
-      "description": "Производит древесину"
+      "description": "Заготавливает древесину. Шумная"
     },
     {
       "id": "warehouse",
@@ -211,9 +246,12 @@
       "upkeep": 1,
       "workers": 3,
       "income": 6,
+      "power_use": 3,
+      "storage": 200,
       "size": [1, 1],
+      "floors": 2,
       "color": [160, 140, 110],
-      "description": "Хранит произведённые ресурсы"
+      "description": "Увеличивает склад ресурсов"
     },
     {
       "id": "factory",
@@ -223,9 +261,16 @@
       "upkeep": 5,
       "workers": 20,
       "income": 35,
+      "power_use": 25,
+      "water_use": 10,
+      "produces": {"goods": 12},
+      "consumes": {"wood": 6},
+      "happiness": -25,
+      "radius": 4,
       "size": [2, 2],
+      "floors": 3,
       "color": [150, 80, 80],
-      "description": "Превращает сырьё в товары"
+      "description": "Делает товары из древесины"
     },
 
     {
@@ -235,9 +280,14 @@
       "price": 500,
       "upkeep": 8,
       "workers": 15,
+      "power_output": 300,
+      "happiness": -20,
+      "radius": 4,
       "size": [2, 2],
+      "floors": 3,
       "color": [200, 90, 50],
-      "description": "Снабжает город электричеством"
+      "placement": "near_water",
+      "description": "Электричество для района"
     },
     {
       "id": "solar_panel",
@@ -245,7 +295,9 @@
       "category": "utilities",
       "price": 200,
       "upkeep": 1,
+      "power_output": 40,
       "size": [1, 1],
+      "floors": 0,
       "color": [60, 90, 160],
       "description": "Чистая энергия, но немного"
     },
@@ -256,9 +308,12 @@
       "price": 150,
       "upkeep": 2,
       "workers": 2,
+      "power_use": 5,
+      "water_output": 80,
       "size": [1, 1],
+      "floors": 4,
       "color": [90, 170, 200],
-      "description": "Подаёт воду в дома"
+      "description": "Подаёт воду в дома района"
     },
     {
       "id": "water_treatment",
@@ -267,9 +322,13 @@
       "price": 400,
       "upkeep": 5,
       "workers": 10,
+      "power_use": 15,
+      "water_output": 400,
       "size": [2, 2],
+      "floors": 1,
       "color": [60, 140, 160],
-      "description": "Очищает воду для всего района"
+      "placement": "near_water",
+      "description": "Много воды для района"
     },
 
     {
@@ -278,9 +337,12 @@
       "category": "public",
       "price": 60,
       "upkeep": 1,
+      "happiness": 10,
+      "radius": 3,
       "size": [1, 1],
+      "floors": 0,
       "color": [60, 160, 70],
-      "description": "Жители становятся счастливее"
+      "description": "Жители рядом счастливее"
     },
     {
       "id": "school",
@@ -289,7 +351,12 @@
       "price": 300,
       "upkeep": 4,
       "workers": 10,
+      "power_use": 10,
+      "water_use": 4,
+      "happiness": 15,
+      "radius": 6,
       "size": [2, 2],
+      "floors": 2,
       "color": [220, 150, 90],
       "description": "Образование для детей"
     },
@@ -300,7 +367,12 @@
       "price": 500,
       "upkeep": 6,
       "workers": 15,
+      "power_use": 20,
+      "water_use": 10,
+      "happiness": 20,
+      "radius": 8,
       "size": [2, 2],
+      "floors": 4,
       "color": [230, 230, 235],
       "description": "Лечит жителей"
     },
@@ -311,7 +383,11 @@
       "price": 250,
       "upkeep": 3,
       "workers": 6,
+      "power_use": 5,
+      "happiness": 10,
+      "radius": 6,
       "size": [1, 1],
+      "floors": 2,
       "color": [60, 80, 160],
       "description": "Снижает преступность"
     },
@@ -322,7 +398,12 @@
       "price": 250,
       "upkeep": 3,
       "workers": 6,
+      "power_use": 5,
+      "water_use": 4,
+      "happiness": 10,
+      "radius": 6,
       "size": [1, 1],
+      "floors": 2,
       "color": [200, 50, 50],
       "description": "Тушит пожары в округе"
     }

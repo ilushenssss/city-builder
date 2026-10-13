@@ -55,9 +55,10 @@ from city_builder.config import (
     MENU_CARD_COLUMNS,
     MENU_CARD_COUNT,
     MENU_HEADER_HEIGHT,
+    RESOURCE_NAMES,
     UI_BORDER_RADIUS,
 )
-from city_builder.data.catalog import Catalog, ShopItem
+from city_builder.data.catalog import PLACEMENT_NEAR_WATER, Catalog, ShopItem
 from city_builder.render.images import ImageLibrary
 from city_builder.ui.button import ICON_BACK, ICON_CLOSE, Button
 from city_builder.ui.card import Card, CardFonts
@@ -76,9 +77,14 @@ def category_page_id(category_id: str) -> str:
 
 def item_details_lines(item: ShopItem) -> list[str]:
     """Характеристики товара для карточки, по строке на тему:
-        «Работа: 6 · Доход: 12»   — что здание даёт
-        «Содержание: 2»           — сколько стоит за тик
+        «Работа: 20 · Доход: 35»        — что здание даёт людям и деньгам
+        «Энергия −25 · Вода −10»        — сколько берёт из района (или «+300» — даёт)
+        «Древесина 6 → Товары 12»       — цепочка: что берёт со склада и что производит
+        «Загрязнение −25 (р. 4)»        — влияние на счастье домов вокруг
+        «Только у воды · Содерж. 5»     — особые правила и содержание
     Показываем только то, что у товара есть (нули пропускаем)."""
+    lines = []
+
     gives = []
     if item.housing:
         gives.append(f"Жильё: {item.housing}")
@@ -86,11 +92,40 @@ def item_details_lines(item: ShopItem) -> list[str]:
         gives.append(f"Работа: {item.workers}")
     if item.income:
         gives.append(f"Доход: {item.income}")
-    lines = []
+    if item.storage:
+        gives.append(f"Склад +{item.storage}")
     if gives:
         lines.append(" · ".join(gives))  # " · ".join(["a", "b"]) -> "a · b"
+
+    utilities = []
+    if item.power_output:
+        utilities.append(f"Энергия +{item.power_output}")
+    if item.power_use:
+        utilities.append(f"Энергия −{item.power_use}")
+    if item.water_output:
+        utilities.append(f"Вода +{item.water_output}")
+    if item.water_use:
+        utilities.append(f"Вода −{item.water_use}")
+    if utilities:
+        lines.append(" · ".join(utilities))
+
+    if item.consumes or item.produces:
+        takes = ", ".join(f"{RESOURCE_NAMES[r]} {n}" for r, n in item.consumes.items())
+        makes = ", ".join(f"{RESOURCE_NAMES[r]} {n}" for r, n in item.produces.items())
+        lines.append(f"{takes} → {makes}" if takes and makes else (f"→ {makes}" if makes else f"Нужно: {takes}"))
+
+    if item.happiness > 0:
+        lines.append(f"Счастье +{item.happiness} (р. {item.radius})")
+    elif item.happiness < 0:
+        lines.append(f"Загрязнение {item.happiness} (р. {item.radius})")
+
+    last = []
+    if item.placement == PLACEMENT_NEAR_WATER:
+        last.append("Только у воды")
     if item.upkeep:
-        lines.append(f"Содержание: {item.upkeep}")
+        last.append(f"Содерж. {item.upkeep}")
+    if last:
+        lines.append(" · ".join(last))
     return lines
 
 
@@ -211,7 +246,9 @@ class Menu:
                 rect,
                 category.name,
                 color=category.color,
-                image=self._card_image(self.images.for_category(category)),
+                # Своя картинка категории, а если её нет — спрайт первого товара категории
+                image=self._card_image(self.images.for_category(category)
+                                       or (self.images.sprite(items[0]) if items else None)),
                 description=category.description,
                 footer=items_count_text(len(items)),
                 opens=page_id,
@@ -225,7 +262,7 @@ class Menu:
                     item_rect,
                     item.name,
                     color=item.color,
-                    image=self._card_image(self.images.for_item(item)),
+                    image=self._card_image(self.images.sprite(item)),  # PNG или нарисованный спрайт
                     description=item.description,
                     details=item_details_lines(item),
                     footer=f"Цена: {item.price}",

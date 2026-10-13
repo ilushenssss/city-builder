@@ -1,7 +1,7 @@
 """Здание, построенное на карте."""
 
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from city_builder.data.catalog import ShopItem
 
@@ -17,11 +17,23 @@ class Building:
     # Есть ли рядом дорога. Пересчитывает экономика (Economy.refresh) после каждой
     # постройки и сноса. Без дороги здание не работает: нет жителей, работы и дохода.
     connected: bool = True
+    # Есть ли электричество и вода (если здание их потребляет). Считает economy/networks.py.
+    powered: bool = True
+    watered: bool = True
+    # Насколько здание работает в последнем тике: 1.0 — полностью, 0.5 — наполовину
+    # (не хватает работников или сырья). Считает Economy.tick.
+    efficiency: float = 1.0
+    # Счастье жителей дома (0–100), только для жилых зданий. Считает economy/happiness.py.
+    happiness: float = 0.0
+    # Список проблем для значка и подсказки: "road", "power", "water", "inputs"
+    problems: list[str] = field(default_factory=list)
 
     @property
     def working(self) -> bool:
-        """Работает ли здание: ему не нужна дорога, или дорога рядом есть."""
-        return self.connected or not self.item.needs_road
+        """Работает ли здание вообще: есть дорога (если нужна), электричество и вода.
+        Нехватка работников или сырья не «выключает» здание, а снижает efficiency."""
+        has_road = self.connected or not self.item.needs_road
+        return has_road and self.powered and self.watered
 
     @property
     def width(self) -> int:

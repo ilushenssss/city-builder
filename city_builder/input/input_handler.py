@@ -13,7 +13,8 @@ import math
 
 import pygame
 
-from city_builder.config import CAMERA_SPEED, TILE_SIZE, ZOOM_STEP
+from city_builder.config import CAMERA_SPEED, ZOOM_STEP
+from city_builder.render import iso
 from city_builder.render.camera import Camera
 from city_builder.world.grid import Grid
 from city_builder.world.tile import Tile
@@ -81,7 +82,6 @@ class InputHandler:
         self.mouse_pos = pygame.mouse.get_pos()
         # Пиксели экрана -> координаты мира
         wx, wy = self.camera.screen_to_world(*self.mouse_pos)
-        # Координаты мира -> номер клетки (делим на размер клетки и округляем вниз).
-        # floor, а не int: int(-0.5) = 0, а нам нужно -1 (клетка за картой).
+        # Координаты мира -> номер клетки (обратная изометрическая формула, см. iso.py).
         # grid.get вернёт None, если курсор вне карты.
-        self.hovered_tile = self.grid.get(math.floor(wx / TILE_SIZE), math.floor(wy / TILE_SIZE))
+        self.hovered_tile = self.grid.get(*iso.world_to_tile_index(wx, wy))

@@ -103,13 +103,20 @@ class DemolishMode:
 
     # --- Каждый кадр ---
 
-    def update_hover(self, tile: Tile | None) -> None:
+    def update_hover(self, tile: Tile | None, picked: Building | None = None) -> None:
+        """tile   — клетка земли под курсором;
+        picked — здание, на картинку которого указывает курсор (Renderer.pick_building).
+
+        В изометрии высокое здание закрывает клетки позади себя: курсор может быть
+        над верхними этажами небоскрёба, а «под ним» на земле — другая клетка.
+        Поэтому сначала смотрим, по какой картинке кликают, и только потом — на клетку.
+        """
         if not self.active:
             return
         self.hovered_tile = tile
         # У большого здания каждая его клетка ссылается на само здание,
         # поэтому навести можно на любую часть
-        self.hovered = tile.building if tile else None
+        self.hovered = picked or (tile.building if tile else None)
 
     # --- Ввод ---
 

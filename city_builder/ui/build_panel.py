@@ -122,22 +122,46 @@ class BuildPanel:
 
     def _build_texts(self) -> tuple[str, Color, str, Color]:
         """(заголовок, его цвет, подсказка, её цвет) для строительства."""
-        item = self.build.item
+        build = self.build
+        item = build.item
         assert item is not None  # панель рисуется, только когда товар выбран
-        if self.build.state == BuildState.CONFIRMING:
-            title = f"Построить «{item.name}» за {item.price}?"
-            warning = self.build.target_warning
+
+        # --- Тянем дорогу ---
+        if build.state == BuildState.DRAGGING:
+            title = f"{item.name}: {len(build.drag_ok)} кл. · Цена: {build.total_price}"
+            if build.confirm_error:
+                return title, COLOR_TEXT, build.confirm_error, COLOR_TEXT_ERROR
+            skipped = len(build.drag_skip) + len(build.drag_bad)
+            hint = "Отпустите кнопку, чтобы выбрать участок"
+            if skipped:
+                hint += f"   Пропущено клеток: {skipped} (уже дорога или нельзя строить)"
+            return title, COLOR_TEXT, hint, COLOR_TEXT_DIM
+
+        # --- Подтверждение ---
+        if build.state == BuildState.CONFIRMING:
+            if len(build.targets) > 1 or build.draggable:
+                title = f"Построить {len(build.targets)} × «{item.name}» за {build.total_price}?"
+            else:
+                title = f"Построить «{item.name}» за {item.price}?"
+            if build.confirm_error:
+                return title, COLOR_PRICE, build.confirm_error, COLOR_TEXT_ERROR
+            warning = build.target_warning
             if warning:
                 return title, COLOR_PRICE, f"Внимание: {warning}", COLOR_WARNING
             return title, COLOR_PRICE, "Enter — построить   Esc — выбрать другое место", COLOR_TEXT_DIM
+
+        # --- Выбор места ---
         width, height = item.size
         title = f"Строительство: {item.name}   Цена: {item.price}   Размер: {width}×{height}"
-        if self.build.cursor_error:
+        if build.cursor_error:
             # Курсор над местом, где строить нельзя, — объясняем почему
-            return title, COLOR_TEXT, self.build.cursor_error, COLOR_TEXT_ERROR
-        if self.build.cursor_warning:
+            return title, COLOR_TEXT, build.cursor_error, COLOR_TEXT_ERROR
+        if build.cursor_warning:
             # Строить можно, но есть проблема (нет дороги)
-            return title, COLOR_TEXT, self.build.cursor_warning, COLOR_WARNING
+            return title, COLOR_TEXT, build.cursor_warning, COLOR_WARNING
+        if build.draggable:
+            return (title, COLOR_TEXT,
+                    "Зажмите ЛКМ и тяните — дорога ляжет по клеткам   ПКМ / Esc — отмена", COLOR_TEXT_DIM)
         return (title, COLOR_TEXT,
                 "ЛКМ — выбрать место   ПКМ / Esc — отменить строительство", COLOR_TEXT_DIM)
 

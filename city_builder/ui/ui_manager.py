@@ -5,7 +5,9 @@ Game общается только с UIManager, а не с каждой кно�
 интерфейсу или карте. Интерфейс всегда «выше» карты, поэтому
 получает события первым.
 
-Панель ресурсов (деньги, жители, скорость) — вверху слева, под ней — панель цели.
+Панель ресурсов (деньги, жители, скорость) — вверху слева, под ней — панель цели
+и панель «Город» (энергия, вода, счастье, склад). При наведении на здание —
+подсказка о нём (BuildingInfo).
 Экран итогов (победа / банкротство) — поверх всего, когда игра закончилась.
 
 Кнопки в правом верхнем углу:   [🗑] [☰] [⏻]
@@ -28,7 +30,9 @@ from city_builder.economy.economy import Economy
 from city_builder.economy.goals import GoalTracker
 from city_builder.render.images import ImageLibrary
 from city_builder.ui.build_panel import BuildPanel
+from city_builder.ui.building_info import BuildingInfo
 from city_builder.ui.button import ICON_DEMOLISH, ICON_EXIT, ICON_MENU, Button
+from city_builder.ui.city_panel import CityPanel
 from city_builder.ui.end_screen import EndScreen
 from city_builder.ui.goal_panel import GoalPanel
 from city_builder.ui.menu import Menu
@@ -74,6 +78,8 @@ class UIManager:
         self.build_panel = BuildPanel(screen_size, build_mode, demolish_mode)
         self.resource_bar = ResourceBar(economy, clock)
         self.goal_panel = GoalPanel(goals)
+        self.city_panel = CityPanel(economy)
+        self.building_info = BuildingInfo(screen_size)
         self.end_screen = EndScreen(screen_size, goals, economy)
 
     @property
@@ -103,7 +109,7 @@ class UIManager:
         # any() — True, если хотя бы одна кнопка содержит курсор
         over_button = any(button.contains(pos) for button in self.buttons)
         over_panel = (self.build_panel.contains(pos) or self.resource_bar.contains(pos)
-                      or self.goal_panel.contains(pos))
+                      or self.goal_panel.contains(pos) or self.city_panel.contains(pos))
         return over_button or over_panel or self.blocks_world
 
     def handle_event(self, event: pygame.event.Event) -> bool:
@@ -153,9 +159,11 @@ class UIManager:
             button.update(mouse_pos)
         self.menu.update(mouse_pos)
         self.build_panel.update(mouse_pos)
-        self.resource_bar.update(mouse_pos)
+        # Панель ресурсов не должна заезжать под кнопки в правом верхнем углу
+        self.resource_bar.update(mouse_pos, max_right=self.demolish_button.rect.left - UI_BUTTON_GAP)
         # Панель цели — сразу под панелью ресурсов (её ширина меняется, а левый край — нет)
         self.goal_panel.update((self.resource_bar.rect.left, self.resource_bar.rect.bottom + 6))
+        self.city_panel.update((self.goal_panel.rect.left, self.goal_panel.rect.bottom + 6))
         self.end_screen.update(mouse_pos)
 
     def draw(self, screen: pygame.Surface) -> None:
@@ -163,9 +171,12 @@ class UIManager:
         # потом панель ресурсов и кнопки в углу — чтобы они оставались яркими
         # поверх затемнения (деньги видно и во время покупок)
         self.build_panel.draw(screen)
+        # Панель цели — под меню: на невысоком экране она иначе закрыла бы заголовок меню
+        self.goal_panel.draw(screen)
+        self.city_panel.draw(screen)
+        self.building_info.draw(screen)  # подсказка о здании — над картой, но под меню
         self.menu.draw(screen)
         self.resource_bar.draw(screen)
-        self.goal_panel.draw(screen)
         for button in self.buttons:
             button.draw(screen)
         # Экран итогов — поверх всего

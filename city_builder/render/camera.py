@@ -2,9 +2,9 @@
 
 В игре есть две системы координат:
 
-* Мир — «настоящие» координаты на карте, в пикселях при zoom = 1.
-  Клетка (x, y) начинается в точке (x * TILE_SIZE, y * TILE_SIZE).
-  Карта 30x30 клеток по 32 px = мир размером 960x960.
+* Мир — плоская картинка карты в пикселях при zoom = 1. Где на ней
+  какая клетка, считает изометрическая проекция (render/iso.py).
+  Камера про изометрию не знает: она только сдвигает и масштабирует мир.
 
 * Экран — пиксели окна. (0, 0) — левый верхний угол окна.
 
@@ -21,16 +21,17 @@ from city_builder.config import ZOOM_MAX, ZOOM_MIN
 
 class Camera:
     def __init__(self, screen_width: int, screen_height: int,
-                 world_width: float, world_height: float) -> None:
-        # Размеры окна и мира нужны для центрирования и ограничения камеры
+                 bounds: tuple[float, float, float, float]) -> None:
+        # Размеры окна нужны для центрирования, границы мира — для ограничения камеры.
+        # bounds = (лево, верх, право, низ): изометрическая карта начинается
+        # не в (0, 0) — её левый край уходит в минус (см. iso.map_bounds).
         self.screen_width = screen_width
         self.screen_height = screen_height
-        self.world_width = world_width
-        self.world_height = world_height
+        self.bounds = bounds
         # Точка мира, которая находится в левом верхнем углу экрана
         self.x = 0.0
         self.y = 0.0
-        self.zoom = 1.0  # масштаб: 1.0 — клетка 32 px, 2.0 — 64 px и т.д.
+        self.zoom = 1.0  # масштаб: 1.0 — ромб клетки 64×32 px, 2.0 — 128×64 и т.д.
 
     def world_to_screen(self, wx: float, wy: float) -> tuple[float, float]:
         """Мир -> экран. Нужно для отрисовки: где на экране нарисовать точку мира.
@@ -87,9 +88,10 @@ class Camera:
         # Половина экрана в единицах мира
         half_w = self.screen_width / (2 * self.zoom)
         half_h = self.screen_height / (2 * self.zoom)
-        # Текущий центр экрана в мире, зажатый в границы [0, размер мира]
-        center_x = max(0.0, min(self.world_width, self.x + half_w))
-        center_y = max(0.0, min(self.world_height, self.y + half_h))
+        # Текущий центр экрана в мире, зажатый в границы карты
+        left, top, right, bottom = self.bounds
+        center_x = max(left, min(right, self.x + half_w))
+        center_y = max(top, min(bottom, self.y + half_h))
         # Пересчитываем левый верхний угол из исправленного центра
         self.x = center_x - half_w
         self.y = center_y - half_h

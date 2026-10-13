@@ -9,11 +9,12 @@ Game — «дирижёр». Сам почти ничего не делает, �
      ├── Economy       — деньги, жители, тик экономики
      ├── GameClock     — игровое время: пауза, скорость, когда делать тик
      ├── GoalTracker   — цель игры, победа и поражение
+     ├── CitizenManager — человечки, которые ходят по дорогам по делам
      ├── Camera        — откуда мы смотрим на карту
      ├── InputHandler  — читает ввод, двигает Camera, ищет клетку в Grid
      ├── BuildMode     — строительство: выбранный товар, место, подтверждение
      ├── DemolishMode  — снос: выбор здания, подтверждение
-     ├── Renderer      — рисует Grid через Camera (и призрак здания из BuildMode)
+     ├── Renderer      — рисует Grid в изометрии через Camera (и призрак здания из BuildMode)
      ├── UIManager     — интерфейс: панель ресурсов, кнопки, меню, панель строительства
      └── GameLoop      — крутит цикл и вызывает методы Game каждый кадр
 """
@@ -28,11 +29,11 @@ from city_builder.config import (
     GRID_HEIGHT,
     GRID_WIDTH,
     SHOP_DATA_FILE,
-    TILE_SIZE,
     WINDOW_HEIGHT,
     WINDOW_TITLE,
     WINDOW_WIDTH,
 )
+from city_builder.citizens.citizens import CitizenManager
 from city_builder.construction.build_mode import BuildMode
 from city_builder.construction.demolish_mode import DemolishMode
 from city_builder.core.game_loop import GameLoop
@@ -41,6 +42,7 @@ from city_builder.economy.clock import GameClock
 from city_builder.economy.economy import Economy
 from city_builder.economy.goals import GoalTracker
 from city_builder.input.input_handler import InputHandler
+from city_builder.render import iso
 from city_builder.render.camera import Camera
 from city_builder.render.images import ImageLibrary
 from city_builder.render.renderer import Renderer
@@ -116,13 +118,13 @@ class Game:
         self.economy = Economy(self.grid)
         self.clock = GameClock()
         self.goals = GoalTracker(self.economy)
+        self.citizens = CitizenManager(self.grid, self.economy)
 
         # --- Камера ---
-        # Размер мира в пикселях (при zoom = 1): клеток * TILE_SIZE
-        world_width = self.grid.width * TILE_SIZE
-        world_height = self.grid.height * TILE_SIZE
-        self.camera = Camera(screen_width, screen_height, world_width, world_height)
-        self.camera.center_on(world_width / 2, world_height / 2)  # старт — в центре карты
+        # Границы карты в мире (изометрический ромб) — камера не уедет за них
+        self.camera = Camera(screen_width, screen_height, iso.map_bounds(self.grid.width, self.grid.height))
+        # Старт — в центре карты
+        self.camera.center_on(*iso.tile_to_world(self.grid.width / 2, self.grid.height / 2))
 
         # --- Ввод, режимы, интерфейс ---
         self.input = InputHandler(self.camera, self.grid)
@@ -171,8 +173,15 @@ class Game:
 
         # Режим строительства пересчитывает, куда встанет здание и можно ли там строить
         self.build.update_hover(self.input.hovered_tile)
-        # Режим сноса запоминает, какое здание под курсором
-        self.demolish.update_hover(self.input.hovered_tile)
+        # Режим сноса запоминает, какое здание под курсором. Здание ищем по картинке
+        # (высокий дом закрывает клетки за собой), но только если курсор над картой
+        picked = None
+        if self.input.hovered_tile is not None or not self.ui.is_mouse_over(mouse_pos):
+            picked = self.renderer.pick_building(mouse_pos)
+        self.demolish.update_hover(self.input.hovered_tile, picked)
+        # Подсказка о здании — только когда ничего не строим и не сносим
+        idle = not (self.build.active or self.demolish.active or self.ui.blocks_world)
+        self.ui.building_info.update(picked if idle else None, mouse_pos)
 
         self.camera.clamp()    # после всех движений не даём камере уехать с карты
 
@@ -181,6 +190,9 @@ class Game:
         self.economy.refresh()
         if self.goals.finished:
             return  # игра окончена (экран итогов) — время стоит
+
+        # Жители ходят в игровом времени: на паузе стоят, на ×3 бегут втрое быстрее
+        self.citizens.update(dt * self.clock.speed)
 
         # Часы говорят, сколько тиков пора сделать (обычно 0, иногда 1)
         for _ in range(self.clock.update(dt)):  # _ — переменная, которая не нужна
@@ -196,7 +208,7 @@ class Game:
 
     def draw(self) -> None:
         """Шаг 3 кадра: отрисовка. Порядок важен — то, что рисуется позже, оказывается сверху."""
-        self.renderer.draw(self.grid, self.camera)  # карта и здания
+        self.renderer.draw(self.grid, self.camera, self.citizens)  # карта, здания, жители
         if self.build.active:
             self.renderer.draw_build_preview(self.build, self.camera)  # призрак здания
         elif self.demolish.active:
@@ -215,7 +227,7 @@ class Game:
                 f"FPS: {self.loop.current_fps:.0f}",
                 f"Zoom: {self.camera.zoom:.2f}",
                 f"Tile: {tile_info}",
-            ], top=self.ui.goal_panel.rect.bottom + 8)
+            ], top=self.ui.city_panel.rect.bottom + 8)
 
         # Интерфейс рисуем последним — он всегда поверх карты
         self.ui.draw(self.screen)

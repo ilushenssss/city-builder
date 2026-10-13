@@ -19,7 +19,7 @@
 """
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -27,9 +27,10 @@ from typing import Any
 Color = tuple[int, int, int]
 
 # Где можно ставить товар (поле "placement" в shop.json)
-PLACEMENT_LAND = "land"    # только на суше (по умолчанию)
-PLACEMENT_WATER = "water"  # только на воде (например, мост)
-PLACEMENTS = (PLACEMENT_LAND, PLACEMENT_WATER)
+PLACEMENT_LAND = "land"              # только на суше (по умолчанию)
+PLACEMENT_WATER = "water"            # только на воде (например, мост)
+PLACEMENT_NEAR_WATER = "near_water"  # на суше, но вплотную к воде (электростанция — для охлаждения)
+PLACEMENTS = (PLACEMENT_LAND, PLACEMENT_WATER, PLACEMENT_NEAR_WATER)
 
 
 class CatalogError(Exception):
@@ -69,6 +70,24 @@ class ShopItem:
     workers: int = 0          # рабочих мест
     income: int = 0           # доход за тик, если все рабочие места заняты
     needs_road: bool = True   # работает, только если рядом есть дорога
+    floors: int = 1           # этажей — высота здания в изометрии (0 — плоское: дорога, парк)
+
+    # --- Инфраструктура (см. economy/networks.py) ---
+    power_output: int = 0     # сколько электричества даёт (электростанция)
+    power_use: int = 0        # сколько потребляет; без электричества здание не работает
+    water_output: int = 0     # сколько воды даёт (водонапорная башня)
+    water_use: int = 0        # сколько потребляет; без воды здание не работает
+
+    # --- Производство (см. economy/economy.py) ---
+    # Словари «ресурс -> сколько за тик»: {"wood": 6}. Ресурсы — в config.RESOURCE_NAMES.
+    # field(default_factory=dict) — у каждого товара свой пустой словарь по умолчанию
+    produces: dict[str, int] = field(default_factory=dict)
+    consumes: dict[str, int] = field(default_factory=dict)
+    storage: int = 0          # на сколько увеличивает склад (для каждого ресурса)
+
+    # --- Счастье (см. economy/happiness.py) ---
+    happiness: int = 0        # влияние на счастье домов в радиусе: + (парк) или − (завод)
+    radius: int = 0           # радиус влияния в клетках
 
 
 class Catalog:
@@ -165,13 +184,25 @@ def _parse_item(record: Any, index: int) -> ShopItem:
     if price < 0 or upkeep < 0:
         raise CatalogError(f"{where}: цена и содержание не могут быть отрицательными")
 
-    # Экономические поля: необязательные, по умолчанию 0, отрицательными быть не могут
-    economy = {}
-    for field in ("housing", "workers", "income"):
-        value = _get(record, field, int, where, default=0)
+    # Числовые поля: необязательные, отрицательными быть не могут.
+    # По умолчанию 0, а этажей — 1 (обычное одноэтажное здание).
+    numbers: dict[str, Any] = {}
+    non_negative = (("housing", 0), ("workers", 0), ("income", 0), ("floors", 1),
+                    ("power_output", 0), ("power_use", 0), ("water_output", 0), ("water_use", 0),
+                    ("storage", 0), ("radius", 0))
+    for name, default in non_negative:
+        value = _get(record, name, int, where, default=default)
         if value < 0:
-            raise CatalogError(f'{where}: поле "{field}" не может быть отрицательным')
-        economy[field] = value
+            raise CatalogError(f'{where}: поле "{name}" не может быть отрицательным')
+        numbers[name] = value
+    # Счастье может быть и отрицательным (загрязнение от завода)
+    numbers["happiness"] = _get(record, "happiness", int, where, default=0)
+    if numbers["happiness"] and not numbers["radius"]:
+        raise CatalogError(f'{where}: у "happiness" должен быть "radius" — на сколько клеток действует')
+
+    # Производство и потребление ресурсов
+    numbers["produces"] = _parse_resources(_get(record, "produces", dict, where, default={}), where, "produces")
+    numbers["consumes"] = _parse_resources(_get(record, "consumes", dict, where, default={}), where, "consumes")
 
     placement = _get(record, "placement", str, where, default=PLACEMENT_LAND)
     if placement not in PLACEMENTS:
@@ -191,7 +222,7 @@ def _parse_item(record: Any, index: int) -> ShopItem:
         placement=placement,
         image=_get(record, "image", str, where, default=None),
         needs_road=_get(record, "needs_road", bool, where, default=True),
-        **economy,  # ** раскрывает словарь в именованные аргументы: housing=..., workers=...
+        **numbers,  # ** раскрывает словарь в именованные аргументы: housing=..., workers=...
     )
 
 
@@ -242,6 +273,21 @@ def _parse_color(value: list, where: str) -> Color:
     if not valid:
         raise CatalogError(f"{where}: цвет должен быть [r, g, b] с числами от 0 до 255, а сейчас {value}")
     return value[0], value[1], value[2]
+
+
+def _parse_resources(value: dict, where: str, field_name: str) -> dict[str, int]:
+    """{"wood": 6} — ресурс из config.RESOURCE_NAMES и положительное целое количество."""
+    from city_builder.config import RESOURCE_NAMES  # импорт здесь, чтобы было видно, откуда список
+
+    for resource, amount in value.items():
+        if resource not in RESOURCE_NAMES:
+            raise CatalogError(
+                f'{where}: в "{field_name}" неизвестный ресурс "{resource}". '
+                f"Доступные: {', '.join(RESOURCE_NAMES)}"
+            )
+        if not isinstance(amount, int) or isinstance(amount, bool) or amount <= 0:
+            raise CatalogError(f'{where}: в "{field_name}" количество «{resource}» должно быть целым > 0')
+    return dict(value)
 
 
 def _parse_size(value: list, where: str) -> tuple[int, int]:

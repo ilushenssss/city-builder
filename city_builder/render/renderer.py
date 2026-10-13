@@ -1,222 +1,343 @@
-"""Отрисовка мира через pygame.
+"""Отрисовка мира в изометрии (вид под углом).
 
-Renderer только рисует: он читает данные (Grid, Camera, BuildMode), но ничего
-в них не меняет. Вся игровая логика живёт в других модулях.
+Renderer только рисует: он читает данные (Grid, Camera, BuildMode, жители),
+но ничего в них не меняет. Вся игровая логика живёт в других модулях.
 
-Слои (снизу вверх): клетки -> линии сетки -> здания -> призрак/подсветка.
+Слои (снизу вверх):
+  1. Земля: трава и вода — ромбы клеток.
+  2. Дороги — плоские, лежат на земле, поэтому рисуются сразу после неё.
+  3. Здания и жители — ВПЕРЕМЕШКУ, отсортированные по «глубине» (x + y):
+     сначала дальние, потом ближние. Так ближний дом закрывает человечка
+     за ним, а человечек перед домом — виден. Это «алгоритм художника»:
+     художник тоже пишет сначала задний план, потом передний.
+  4. Призрак строительства и подсветка сноса — поверх всего (рисуются отдельно).
 
 Как рисует pygame: есть «поверхность» (Surface) окна — по сути картинка
-в памяти. Мы рисуем на ней прямоугольники и текст, а в конце кадра
-GameLoop вызывает pygame.display.flip(), и картинка появляется на экране.
+в памяти. Мы рисуем на ней спрайты и текст, а в конце кадра GameLoop
+вызывает pygame.display.flip(), и картинка появляется на экране.
 """
 
 import math
 
 import pygame
 
+from city_builder.citizens.citizens import CitizenManager, Walker
 from city_builder.config import (
     COLOR_BACKGROUND,
     COLOR_DEMOLISH,
     COLOR_GHOST_BAD,
     COLOR_GHOST_OK,
     COLOR_GHOST_PENDING,
-    COLOR_GRID_LINE,
     COLOR_HOVER,
     COLOR_TEXT,
-    DEMOLISH_HOVER_ALPHA,
-    DEMOLISH_TARGET_ALPHA,
-    COLOR_NO_ROAD_BADGE,
+    DEMOLISH_HOVER_TINT,
+    DEMOLISH_TARGET_TINT,
     FLAT_CATEGORIES,
-    NO_ROAD_DIM_ALPHA,
     GHOST_ALPHA,
-    GRID_LINES_MIN_TILE_PX,
+    ISO_TILE_HEIGHT,
+    ISO_TILE_WIDTH,
+    NO_ROAD_TINT,
+    PROBLEM_COLORS,
     TILE_COLORS,
-    TILE_SIZE,
 )
 from city_builder.construction.build_mode import BuildMode, BuildState
 from city_builder.construction.demolish_mode import DemolishMode, DemolishState
+from city_builder.data.catalog import ShopItem
+from city_builder.render import iso
 from city_builder.render.camera import Camera
 from city_builder.render.images import ImageLibrary
 from city_builder.world.building import Building
 from city_builder.world.grid import Grid
 from city_builder.world.tile import Tile
 
+SKIN = (240, 200, 160)  # цвет лица человечков
 
-def darker(color: tuple[int, int, int], factor: float = 0.6) -> tuple[int, int, int]:
-    """Тот же цвет, но темнее (для рамки здания)."""
-    r, g, b = color
-    return int(r * factor), int(g * factor), int(b * factor)
+
+def is_flat(building: Building) -> bool:
+    """Плоские объекты (дороги) лежат на земле и рисуются отдельным слоем."""
+    return building.item.category in FLAT_CATEGORIES
 
 
 class Renderer:
     def __init__(self, screen: pygame.Surface, images: ImageLibrary) -> None:
         self.screen = screen  # поверхность окна, на которой рисуем
-        self.images = images  # картинки зданий (с кэшем)
+        self.images = images  # спрайты зданий и местности (с кэшем)
         # Шрифт загружаем один раз здесь, а не каждый кадр — это медленно.
         self.font = pygame.font.SysFont("consolas", 16)
+        # Что где нарисовано в последнем кадре: (прямоугольник, картинка, здание).
+        # По этому списку pick_building() узнаёт, на какое здание указывает курсор.
+        self._hits: list[tuple[pygame.Rect, pygame.Surface, Building]] = []
+        self._shadow_cache: dict[int, pygame.Surface] = {}
 
-    def tile_rect(self, x: int, y: int, camera: Camera) -> pygame.Rect:
-        """Прямоугольник клетки (x, y) на экране."""
-        return self.area_rect(x, y, 1, 1, camera)
+    # --- Геометрия: где на экране клетка и спрайт ---
 
-    def area_rect(self, x: int, y: int, width: int, height: int, camera: Camera) -> pygame.Rect:
-        """Прямоугольник на экране для области клеток: от (x, y), размером width × height.
+    def screen_point(self, camera: Camera, tx: float, ty: float) -> tuple[float, float]:
+        """Точка клетки (может быть дробной) -> пиксель экрана."""
+        return camera.world_to_screen(*iso.tile_to_world(tx, ty))
 
-        Считаем экранные координаты левого верхнего и правого нижнего углов
-        и округляем каждый угол отдельно. Если бы округляли ширину,
-        при дробном масштабе (например, 1.1) между клетками появлялись бы
-        щели в 1 пиксель.
+    def footprint_points(self, camera: Camera, x: float, y: float,
+                         width: float, height: float) -> list[tuple[float, float]]:
+        """Четыре угла ромба области клеток на экране (для рамок)."""
+        return [camera.world_to_screen(wx, wy) for wx, wy in iso.footprint_corners(x, y, width, height)]
+
+    def sprite_rect(self, camera: Camera, x: int, y: int, width: int, height: int,
+                    sprite: pygame.Surface) -> pygame.Rect:
+        """Где на экране нарисовать спрайт здания w × h, стоящего в клетке (x, y).
+
+        Ширина спрайта = ширине ромба основания; нижний край спрайта = нижний
+        угол ромба. Высота — пропорционально картинке (высокие здания — выше).
         """
-        left, top = camera.world_to_screen(x * TILE_SIZE, y * TILE_SIZE)
-        right, bottom = camera.world_to_screen((x + width) * TILE_SIZE, (y + height) * TILE_SIZE)
-        left, top, right, bottom = round(left), round(top), round(right), round(bottom)
-        # Rect(x, y, ширина, высота) — прямоугольник в pygame
-        return pygame.Rect(left, top, right - left, bottom - top)
+        left, top, box_w, box_h = iso.footprint_box(x, y, width, height)
+        sl, sb = camera.world_to_screen(left, top + box_h)
+        sr, _ = camera.world_to_screen(left + box_w, top + box_h)
+        rect_w = max(1, round(sr) - round(sl))
+        rect_h = max(1, round(sprite.get_height() * rect_w / sprite.get_width()))
+        return pygame.Rect(round(sl), round(sb) - rect_h, rect_w, rect_h)
 
-    def draw(self, grid: Grid, camera: Camera) -> None:
-        """Нарисовать карту. Вызывается каждый кадр."""
-        # Сначала заливаем всё фоном — стираем прошлый кадр
-        self.screen.fill(COLOR_BACKGROUND)
+    def item_sprite_rect(self, camera: Camera, item: ShopItem, x: int, y: int) -> tuple[pygame.Surface, pygame.Rect]:
+        sprite = self.images.sprite(item)
+        width, height = item.size
+        return sprite, self.sprite_rect(camera, x, y, width, height, sprite)
 
-        # --- Рисуем только видимые клетки ---
-        # Узнаём, какой кусок мира сейчас виден: переводим углы экрана в мир
+    # --- Главная отрисовка ---
+
+    def draw(self, grid: Grid, camera: Camera, citizens: CitizenManager | None = None) -> None:
+        """Нарисовать карту, здания и жителей. Вызывается каждый кадр."""
+        self.screen.fill(COLOR_BACKGROUND)  # стираем прошлый кадр
+        self._hits = []
+        self._draw_terrain(grid, camera)
+        self._draw_roads(grid, camera)
+        self._draw_buildings_and_walkers(grid, camera, citizens)
+
+    def _visible_tile_range(self, grid: Grid, camera: Camera) -> tuple[range, range]:
+        """Какие клетки могут попасть на экран: переводим углы экрана в клетки.
+
+        В изометрии видимая часть карты — «ромб» в координатах клеток, поэтому
+        берём описанный вокруг него прямоугольник (несколько лишних клеток — не страшно).
+        """
         width, height = self.screen.get_size()
-        left, top = camera.screen_to_world(0, 0)
-        right, bottom = camera.screen_to_world(width, height)
-        # ...и переводим в номера клеток. max/min — чтобы не выйти за карту.
-        x0 = max(0, math.floor(left / TILE_SIZE))
-        y0 = max(0, math.floor(top / TILE_SIZE))
-        x1 = min(grid.width, math.floor(right / TILE_SIZE) + 1)  # +1: range не включает конец
-        y1 = min(grid.height, math.floor(bottom / TILE_SIZE) + 1)
+        corners = [iso.world_to_tile(*camera.screen_to_world(sx, sy))
+                   for sx, sy in ((0, 0), (width, 0), (0, height), (width, height))]
+        xs = [c[0] for c in corners]
+        ys = [c[1] for c in corners]
+        x0 = max(0, math.floor(min(xs)) - 1)
+        x1 = min(grid.width, math.ceil(max(xs)) + 1)
+        y0 = max(0, math.floor(min(ys)) - 1)
+        y1 = min(grid.height, math.ceil(max(ys)) + 1)
+        return range(x0, x1), range(y0, y1)
 
-        # При сильном отдалении линии сетки сливаются в кашу — не рисуем их
-        draw_lines = TILE_SIZE * camera.zoom >= GRID_LINES_MIN_TILE_PX
+    def _draw_terrain(self, grid: Grid, camera: Camera) -> None:
+        """Слой 1: трава и вода."""
+        # Подложка всей карты цветом травы — чтобы между ромбами не было щелей
+        pygame.draw.polygon(self.screen, TILE_COLORS["grass"],
+                            self.footprint_points(camera, 0, 0, grid.width, grid.height))
 
-        for y in range(y0, y1):
-            for x in range(x0, x1):
-                # Здесь координаты точно внутри карты, поэтому берём клетку напрямую
-                tile = grid.tiles[y][x]
-                rect = self.tile_rect(x, y, camera)
-                # Заливка клетки цветом её типа
-                pygame.draw.rect(self.screen, TILE_COLORS[tile.type.value], rect)
-                if draw_lines:
-                    # Последний аргумент 1 — толщина линии: рисуем только рамку
-                    pygame.draw.rect(self.screen, COLOR_GRID_LINE, rect, 1)
+        # Размер ромба на экране и шаги: сдвиг на клетку по x и по y.
+        # Считаем один раз на кадр, а не для каждой клетки — так в разы быстрее.
+        hw = ISO_TILE_WIDTH / 2 * camera.zoom
+        hh = ISO_TILE_HEIGHT / 2 * camera.zoom
+        tile_size = (math.ceil(hw * 2) + 1, math.ceil(hh * 2) + 1)  # +1 — небольшой нахлёст, без щелей
+        sprites = {name: self.images.scaled(self.images.terrain(name), tile_size) for name in TILE_COLORS}
+        ox, oy = camera.world_to_screen(0, 0)  # верхний угол клетки (0, 0) на экране
+        screen_w, screen_h = self.screen.get_size()
 
-        # --- Здания поверх клеток ---
+        # blits() рисует много картинок одним вызовом — быстрее, чем blit() в цикле
+        batch = []
+        xs, ys = self._visible_tile_range(grid, camera)
+        for y in ys:
+            row = grid.tiles[y]
+            for x in xs:
+                sx = ox + (x - y) * hw - hw
+                sy = oy + (x + y) * hh
+                if sx > screen_w or sy > screen_h or sx + tile_size[0] < 0 or sy + tile_size[1] < 0:
+                    continue  # ромб целиком за краем экрана
+                batch.append((sprites[row[x].type.value], (round(sx), round(sy))))
+        self.screen.blits(batch, doreturn=False)
+
+    def _draw_roads(self, grid: Grid, camera: Camera) -> None:
+        """Слой 2: плоские дороги."""
         screen_rect = self.screen.get_rect()
         for building in grid.buildings:
-            rect = self.area_rect(building.x, building.y, building.width, building.height, camera)
-            if rect.colliderect(screen_rect):  # здание за краем экрана не рисуем
-                self._draw_building(building, rect, camera)
-                if not building.working:
-                    self._draw_no_road_badge(rect, camera)
+            if not is_flat(building):
+                continue
+            sprite, rect = self.item_sprite_rect(camera, building.item, building.x, building.y)
+            if rect.colliderect(screen_rect):
+                scaled = self.images.scaled(sprite, rect.size)
+                self.screen.blit(scaled, rect)
+                self._hits.append((rect, scaled, building))
 
-    def _draw_building(self, building: Building, rect: pygame.Rect, camera: Camera) -> None:
-        """Картинка здания из assets/, а если её нет — цветной прямоугольник."""
-        image = self.images.for_item(building.item)
-        if image is not None:
-            # Картинка растягивается на все клетки здания. Отступы и тени
-            # рисует сам художник внутри картинки (прозрачными краями).
-            self.screen.blit(self.images.scaled(image, rect.size), rect)
-            return
+    def _draw_buildings_and_walkers(self, grid: Grid, camera: Camera,
+                                    citizens: CitizenManager | None) -> None:
+        """Слой 3: здания и жители вперемешку, от дальних к ближним."""
+        # Список (глубина, порядок, объект). Порядок нужен, чтобы при равной глубине
+        # здание рисовалось раньше человечка, — и чтобы Python не пытался сравнивать
+        # сами объекты (это вызвало бы ошибку).
+        drawables: list[tuple[float, int, object]] = []
+        for building in grid.buildings:
+            if not is_flat(building):
+                # Глубина здания — по его самой ближней клетке (передний угол)
+                depth = iso.depth(building.x + building.width - 0.5, building.y + building.height - 0.5)
+                drawables.append((depth, 0, building))
+        if citizens:
+            for walker in citizens.visible_walkers():
+                drawables.append((iso.depth(walker.x, walker.y), 1, walker))
+        drawables.sort(key=lambda d: (d[0], d[1]))  # сортировка по глубине
 
-        # --- Запасной вариант: цвет ---
-        color = building.item.color
-        if building.item.category in FLAT_CATEGORIES:
-            # Дорога — во всю клетку, без рамки: соседние клетки сливаются
-            pygame.draw.rect(self.screen, color, rect)
-            return
-        # Остальные здания — с отступом от края клетки и тёмной рамкой,
-        # чтобы соседние здания не сливались в одно пятно.
-        # Отступ растёт вместе с масштабом (при zoom 1 — 3 px).
-        inset = max(1, round(3 * camera.zoom))
-        body = rect.inflate(-2 * inset, -2 * inset)
-        radius = max(2, round(4 * camera.zoom))
-        pygame.draw.rect(self.screen, color, body, border_radius=radius)
-        pygame.draw.rect(self.screen, darker(color), body, 2, border_radius=radius)
+        screen_rect = self.screen.get_rect()
+        for _, _, obj in drawables:
+            if isinstance(obj, Building):
+                self._draw_building(obj, camera, screen_rect)
+            else:
+                self._draw_walker(obj, camera)
 
-    def _draw_no_road_badge(self, rect: pygame.Rect, camera: Camera) -> None:
-        """Отметка на неработающем здании: здание затемнено, в углу красный кружок с «!»."""
-        self._draw_tinted(rect, (0, 0, 0), NO_ROAD_DIM_ALPHA)
-        radius = max(5, round(7 * camera.zoom))
-        # Кружок в правом верхнем углу, чуть внутрь от края
-        cx, cy = rect.right - radius - 2, rect.top + radius + 2
-        pygame.draw.circle(self.screen, COLOR_NO_ROAD_BADGE, (cx, cy), radius)
-        pygame.draw.circle(self.screen, (255, 255, 255), (cx, cy), radius, 1)
-        # Восклицательный знак: чёрточка и точка
-        line_w = max(2, radius // 3)
-        pygame.draw.line(self.screen, (255, 255, 255), (cx, cy - radius // 2),
-                         (cx, cy + radius // 6), line_w)
-        pygame.draw.circle(self.screen, (255, 255, 255), (cx, cy + radius // 2), max(1, line_w // 2 + 1))
+    def _draw_building(self, building: Building, camera: Camera, screen_rect: pygame.Rect) -> None:
+        sprite, rect = self.item_sprite_rect(camera, building.item, building.x, building.y)
+        if not rect.colliderect(screen_rect):
+            return  # здание за краем экрана
+        # Неработающее здание (нет дороги, света или воды) — темнее
+        tint = None if building.working else NO_ROAD_TINT
+        scaled = self.images.scaled(sprite, rect.size, tint=tint)
+        self.screen.blit(scaled, rect)
+        self._hits.append((rect, scaled, building))
+        if building.problems:
+            # Значок первой (главной) проблемы над зданием
+            self._draw_problem_badge(rect, building.problems[0], camera)
+
+    def _draw_problem_badge(self, rect: pygame.Rect, problem: str, camera: Camera) -> None:
+        """Цветной кружок со значком над зданием:
+        «!» — нет дороги, молния — нет света, капля — нет воды, ящик — нет сырья."""
+        r = max(6, round(8 * camera.zoom))
+        cx, cy = rect.centerx, rect.top + r
+        white = (255, 255, 255)
+        pygame.draw.circle(self.screen, PROBLEM_COLORS[problem], (cx, cy), r)
+        pygame.draw.circle(self.screen, white, (cx, cy), r, 1)
+        u = r / 8  # «единица» — все размеры значка в долях радиуса
+        if problem == "road":
+            # Восклицательный знак: чёрточка и точка
+            pygame.draw.line(self.screen, white, (cx, cy - 4 * u), (cx, cy + 1 * u), max(2, round(2 * u)))
+            pygame.draw.circle(self.screen, white, (cx, cy + 4 * u), max(1, round(1.2 * u)))
+        elif problem == "power":
+            # Молния — ломаная из шести точек
+            bolt = [(cx + 1 * u, cy - 6 * u), (cx - 3 * u, cy + 1 * u), (cx, cy + 1 * u),
+                    (cx - 1 * u, cy + 6 * u), (cx + 3 * u, cy - 1 * u), (cx, cy - 1 * u)]
+            pygame.draw.polygon(self.screen, white, bolt)
+        elif problem == "water":
+            # Капля — круг снизу и треугольник сверху
+            pygame.draw.circle(self.screen, white, (cx, cy + 1.5 * u), 3 * u)
+            pygame.draw.polygon(self.screen, white, [(cx, cy - 5.5 * u), (cx - 2.8 * u, cy + 0.5 * u),
+                                                     (cx + 2.8 * u, cy + 0.5 * u)])
+        else:
+            # Ящик — квадрат с полосой посередине
+            box = pygame.Rect(0, 0, round(8 * u), round(7 * u))
+            box.center = (cx, cy)
+            pygame.draw.rect(self.screen, white, box, max(1, round(1.4 * u)))
+            pygame.draw.line(self.screen, white, (box.left, box.top + box.height // 3),
+                             (box.right - 1, box.top + box.height // 3), max(1, round(u)))
+
+    # --- Жители ---
+
+    def _draw_walker(self, walker: Walker, camera: Camera) -> None:
+        """Человечек: тень, туловище цвета одежды и голова. Чуть подпрыгивает при ходьбе."""
+        sx, sy = self.screen_point(camera, walker.x, walker.y)
+        s = camera.zoom  # все размеры растут вместе с масштабом
+        width, height = self.screen.get_size()
+        if not (-20 < sx < width + 20 and -40 < sy < height + 20):
+            return  # за краем экрана
+        lift = CitizenManager.bob(walker) * 1.5 * s
+        # Тень — полупрозрачный эллипс (готовая картинка из кэша по размеру)
+        shadow = self._walker_shadow(max(5, round(11 * s)))
+        self.screen.blit(shadow, shadow.get_rect(center=(sx, sy)))
+        body = pygame.Rect(0, 0, max(2, round(5 * s)), max(4, round(9 * s)))
+        body.midbottom = (round(sx), round(sy - lift))
+        pygame.draw.rect(self.screen, walker.color, body, border_radius=max(1, round(s)))
+        head_r = max(2, round(2.8 * s))
+        pygame.draw.circle(self.screen, SKIN, (body.centerx, body.top - head_r + 1), head_r)
+
+    def _walker_shadow(self, width: int) -> pygame.Surface:
+        if width not in self._shadow_cache:
+            surface = pygame.Surface((width, max(2, width // 2)), pygame.SRCALPHA)
+            pygame.draw.ellipse(surface, (0, 0, 0, 70), surface.get_rect())
+            self._shadow_cache[width] = surface
+        return self._shadow_cache[width]
+
+    # --- Выбор здания мышью ---
+
+    def pick_building(self, pos: tuple[int, int]) -> Building | None:
+        """Какое здание нарисовано в точке экрана pos (самое ближнее к зрителю).
+
+        Проверяем не просто прямоугольник картинки, а её пиксель: у спрайта
+        прозрачные углы, и клик «мимо стены» не должен выбирать здание.
+        """
+        for rect, surface, building in reversed(self._hits):  # с конца — ближние первыми
+            if rect.collidepoint(pos):
+                local = (pos[0] - rect.left, pos[1] - rect.top)
+                if surface.get_at(local).a > 40:  # .a — непрозрачность пикселя
+                    return building
+        return None
+
+    # --- Строительство и снос (поверх всего) ---
+
+    def _draw_outline(self, camera: Camera, x: int, y: int, width: int, height: int,
+                      color: tuple[int, int, int], thickness: int = 2) -> None:
+        pygame.draw.polygon(self.screen, color, self.footprint_points(camera, x, y, width, height), thickness)
+
+    def _draw_ghost(self, camera: Camera, item: ShopItem, site: tuple[int, int],
+                    frame: tuple[int, int, int]) -> None:
+        """Полупрозрачное здание на месте site + рамка основания цвета frame."""
+        sprite, rect = self.item_sprite_rect(camera, item, *site)
+        self.screen.blit(self.images.scaled(sprite, rect.size, GHOST_ALPHA), rect)
+        width, height = item.size
+        self._draw_outline(camera, site[0], site[1], width, height, frame)
 
     def draw_build_preview(self, build: BuildMode, camera: Camera) -> None:
-        """«Призрак» здания: где оно встанет и можно ли его там построить.
+        """«Призрак» строительства.
 
-        PLACING    — у курсора; зелёная рамка — можно, красная — нельзя.
-        CONFIRMING — на выбранном месте; жёлтая рамка — ждём подтверждения.
+        PLACING    — у курсора; зелёная рамка — можно строить, красная — нельзя.
+        DRAGGING   — протягиваем дорогу: зелёные клетки построим, красные — нельзя.
+        CONFIRMING — выбранные места с жёлтой рамкой, ждём подтверждения.
         """
-        if build.item is None:
+        item = build.item
+        if item is None:
+            return
+        if build.state == BuildState.DRAGGING:
+            frame = COLOR_GHOST_BAD if build.confirm_error else COLOR_GHOST_OK
+            for site in build.drag_ok:
+                self._draw_ghost(camera, item, site, frame)
+            for site in build.drag_bad:
+                self._draw_outline(camera, site[0], site[1], 1, 1, COLOR_GHOST_BAD)
             return
         if build.state == BuildState.CONFIRMING:
-            pos, frame_color = build.target, COLOR_GHOST_PENDING
-        else:
-            pos = build.cursor_pos
-            frame_color = COLOR_GHOST_BAD if build.cursor_error else COLOR_GHOST_OK
-        if pos is None:  # курсор вне карты
+            for site in build.targets:
+                self._draw_ghost(camera, item, site, COLOR_GHOST_PENDING)
             return
-
-        width, height = build.item.size
-        rect = self.area_rect(pos[0], pos[1], width, height, camera)
-        # Полупрозрачная картинка здания (или полупрозрачный цвет) + цветная рамка
-        image = self.images.for_item(build.item)
-        if image is not None:
-            self.screen.blit(self.images.scaled(image, rect.size, GHOST_ALPHA), rect)
-        else:
-            self._draw_tinted(rect, build.item.color, GHOST_ALPHA)
-        pygame.draw.rect(self.screen, frame_color, rect, 3)
+        if build.cursor_pos is not None:
+            frame = COLOR_GHOST_BAD if build.cursor_error else COLOR_GHOST_OK
+            self._draw_ghost(camera, item, build.cursor_pos, frame)
 
     def draw_demolish_preview(self, demolish: DemolishMode, camera: Camera) -> None:
-        """Подсветка при сносе.
-
-        SELECTING  — здание под курсором слегка закрашено красным;
-                     если под курсором пусто — обычная белая рамка клетки.
-        CONFIRMING — выбранное здание закрашено ярко-красным, ждём подтверждения.
-        """
+        """Подсветка при сносе: здание под курсором — красноватое, выбранное — красное."""
         if demolish.state == DemolishState.CONFIRMING and demolish.target:
-            building, alpha = demolish.target, DEMOLISH_TARGET_ALPHA
+            building, tint = demolish.target, DEMOLISH_TARGET_TINT
         elif demolish.hovered:
-            building, alpha = demolish.hovered, DEMOLISH_HOVER_ALPHA
+            building, tint = demolish.hovered, DEMOLISH_HOVER_TINT
         else:
             self.draw_hover(demolish.hovered_tile, camera)
             return
-        rect = self.area_rect(building.x, building.y, building.width, building.height, camera)
-        self._draw_tinted(rect, COLOR_DEMOLISH, alpha)
-        pygame.draw.rect(self.screen, COLOR_DEMOLISH, rect, 3)
-
-    def _draw_tinted(self, rect: pygame.Rect, color: tuple[int, int, int], alpha: int) -> None:
-        """Полупрозрачная заливка прямоугольника.
-
-        Обычный pygame.draw.rect не умеет прозрачность, поэтому рисуем на отдельной
-        поверхности с поддержкой прозрачности (SRCALPHA) и накладываем её на экран.
-        """
-        overlay = pygame.Surface(rect.size, pygame.SRCALPHA)
-        overlay.fill((*color, alpha))  # (*цвет, альфа) -> (r, g, b, a)
-        self.screen.blit(overlay, rect.topleft)
+        sprite, rect = self.item_sprite_rect(camera, building.item, building.x, building.y)
+        self.screen.blit(self.images.scaled(sprite, rect.size, tint=tint), rect)
+        self._draw_outline(camera, building.x, building.y, building.width, building.height, COLOR_DEMOLISH)
 
     def draw_hover(self, tile: Tile | None, camera: Camera) -> None:
-        """Белая рамка вокруг клетки под курсором."""
+        """Белая рамка-ромб вокруг клетки под курсором."""
         if tile is None:  # курсор вне карты — рисовать нечего
             return
-        pygame.draw.rect(self.screen, COLOR_HOVER, self.tile_rect(tile.x, tile.y, camera), 2)
+        self._draw_outline(camera, tile.x, tile.y, 1, 1, COLOR_HOVER)
 
     def draw_debug(self, lines: list[str], top: int = 8) -> None:
         """Отладочный текст слева, начиная с высоты top, — по строке на элемент списка."""
         y = top
         for line in lines:
-            # render() превращает текст в картинку (Surface).
-            # True — сглаживание краёв букв.
+            # render() превращает текст в картинку (Surface). True — сглаживание краёв букв.
             surface = self.font.render(line, True, COLOR_TEXT)
-            # blit — «наклеить» одну картинку на другую в точке (8, y)
             self.screen.blit(surface, (8, y))
             y += surface.get_height() + 2  # следующая строка ниже

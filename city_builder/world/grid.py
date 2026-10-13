@@ -9,7 +9,7 @@ import random
 from collections.abc import Iterator
 
 from city_builder.config import ROAD_CATEGORIES
-from city_builder.data.catalog import PLACEMENT_WATER, ShopItem
+from city_builder.data.catalog import PLACEMENT_NEAR_WATER, PLACEMENT_WATER, ShopItem
 from city_builder.world.building import Building
 from city_builder.world.tile import Tile, TileType
 
@@ -68,7 +68,23 @@ class Grid:
                     return f"{item.name}: строится только на воде"
                 if not needs_water and is_water:
                     return "Нельзя строить на воде"
+        if item.placement == PLACEMENT_NEAR_WATER and not self.site_near_water(x, y, width, height):
+            return f"{item.name}: строится только вплотную к воде"
         return None
+
+    def _around(self, x: int, y: int, width: int, height: int) -> list[tuple[int, int]]:
+        """Клетки вплотную к области (сверху, снизу, слева, справа; без углов)."""
+        around = [(tx, y - 1) for tx in range(x, x + width)] + [(tx, y + height) for tx in range(x, x + width)]
+        around += [(x - 1, ty) for ty in range(y, y + height)] + [(x + width, ty) for ty in range(y, y + height)]
+        return around
+
+    def site_near_water(self, x: int, y: int, width: int, height: int) -> bool:
+        """Есть ли вода вплотную к области — для электростанции и водоочистной."""
+        for tx, ty in self._around(x, y, width, height):
+            tile = self.get(tx, ty)
+            if tile is not None and tile.type == TileType.WATER:
+                return True
+        return False
 
     def place(self, item: ShopItem, x: int, y: int) -> Building:
         """Поставить здание. Перед вызовом место нужно проверить через placement_error."""
@@ -114,6 +130,44 @@ class Grid:
 
     def has_road_access(self, building: Building) -> bool:
         return self.site_has_road(building.x, building.y, building.width, building.height)
+
+    def roads_around(self, building: Building) -> list[tuple[int, int]]:
+        """Все клетки дороги вплотную к зданию (те же клетки, что в site_has_road).
+        Отсюда жители выходят из здания и сюда приходят."""
+        around = self._around(building.x, building.y, building.width, building.height)
+        return [(tx, ty) for tx, ty in around if self.is_road(tx, ty)]
+
+    def find_road_path(self, start: tuple[int, int],
+                       goals: set[tuple[int, int]]) -> list[tuple[int, int]] | None:
+        """Кратчайший путь по дорогам от клетки start до любой клетки из goals.
+
+        Поиск в ширину (BFS): сначала проверяем соседей start, потом соседей
+        соседей и т.д. — как круги на воде. Первая достигнутая цель — самая близкая.
+        Для каждой клетки запоминаем, откуда в неё пришли (came_from), а в конце
+        восстанавливаем путь, двигаясь от цели назад к старту.
+
+        Возвращает список клеток от start до цели или None, если пути нет.
+        """
+        from collections import deque  # очередь: быстро добавлять в конец и брать из начала
+
+        came_from: dict[tuple[int, int], tuple[int, int] | None] = {start: None}
+        queue = deque([start])
+        while queue:
+            current = queue.popleft()
+            if current in goals:
+                # Восстанавливаем путь от цели к старту и разворачиваем
+                path = []
+                node: tuple[int, int] | None = current
+                while node is not None:
+                    path.append(node)
+                    node = came_from[node]
+                return path[::-1]  # [::-1] — список задом наперёд
+            cx, cy = current
+            for nxt in ((cx + 1, cy), (cx - 1, cy), (cx, cy + 1), (cx, cy - 1)):
+                if nxt not in came_from and self.is_road(*nxt):
+                    came_from[nxt] = current
+                    queue.append(nxt)
+        return None
 
     def __iter__(self) -> Iterator[Tile]:
         """Позволяет перебирать все клетки одним циклом: for tile in grid: ..."""

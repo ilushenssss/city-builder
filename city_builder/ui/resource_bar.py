@@ -5,9 +5,9 @@
     └────────────────────────────────────────────────────────────────────────────┘
                                                               ▔▔▔▔ полоска до следующего тика
 
-  * (+35) — сколько денег прибавится за следующий тик (зелёным) или убавится (красным).
+  * (+35) — насколько изменились деньги за последний тик (зелёным — плюс, красным — минус).
     Наведите курсор на деньги — появится подсказка, из чего складывается эта сумма.
-  * «Без дороги: 3» — появляется, если есть неработающие здания.
+  * «Проблемы: 3» — здания без дороги, света, воды или сырья (значки над ними).
   * Скорость: кнопки или клавиши Пробел (пауза), 1, 2, 3.
 
 Ширина панели зависит от текста, поэтому раскладка (где что стоит)
@@ -47,6 +47,10 @@ SPEED_KEYS = {
     pygame.K_2: 2, pygame.K_KP2: 2,
     pygame.K_3: 3, pygame.K_KP3: 3,
 }
+
+# Подписи блоков: полные и короткие (для узкого экрана)
+LABELS = {"money": "Деньги: ", "people": "Жители: ", "jobs": "Работа: ", "problems": "Проблемы: "}
+SHORT_LABELS = {"money": "", "people": "Жит. ", "jobs": "Раб. ", "problems": "Пробл. "}
 
 # Кусок текста одного цвета: ("Деньги: ", серый). Блок панели — несколько таких кусков.
 Piece = tuple[str, tuple[int, int, int]]
@@ -112,29 +116,32 @@ class ResourceBar:
 
     # --- Содержимое панели ---
 
-    def _segments(self) -> list[list[Piece]]:
-        """Тексты всех блоков панели слева направо."""
+    def _segments(self, compact: bool = False) -> list[list[Piece]]:
+        """Тексты всех блоков панели слева направо.
+        compact=True — короткие подписи, если панель не помещается на узком экране."""
         eco = self.economy
+        label = SHORT_LABELS if compact else LABELS
         net = eco.forecast().net
         money_color = COLOR_MONEY_NEGATIVE if eco.money < 0 else COLOR_PRICE
         net_color = COLOR_MONEY_POSITIVE if net >= 0 else COLOR_MONEY_NEGATIVE
 
         segments = [
-            [("Деньги: ", COLOR_TEXT_DIM), (format_number(eco.money), money_color),
+            [(label["money"], COLOR_TEXT_DIM), (format_number(eco.money), money_color),
              (f" ({format_signed(net)})", net_color)],
-            [("Жители: ", COLOR_TEXT_DIM),
+            [(label["people"], COLOR_TEXT_DIM),
              (f"{format_number(eco.population)} / {format_number(eco.stats.housing)}", COLOR_TEXT)],
-            [("Работа: ", COLOR_TEXT_DIM),
+            [(label["jobs"], COLOR_TEXT_DIM),
              (f"{format_number(eco.employed)} / {format_number(eco.stats.jobs)}", COLOR_TEXT)],
         ]
-        if eco.stats.no_road:
-            segments.append([("Без дороги: ", COLOR_TEXT_DIM), (str(eco.stats.no_road), COLOR_WARNING)])
+        problems = eco.problem_count
+        if problems:
+            segments.append([(label["problems"], COLOR_TEXT_DIM), (str(problems), COLOR_WARNING)])
         day_text = "Пауза" if self.clock.paused else f"День {eco.day}"
         segments.append([(day_text, COLOR_WARNING if self.clock.paused else COLOR_TEXT)])
         return segments
 
     def _tooltip_lines(self) -> list[Piece]:
-        """Подсказка при наведении на деньги: из чего складывается сумма за тик."""
+        """Подсказка при наведении на деньги: из чего сложилась сумма за последний тик."""
         report = self.economy.forecast()
 
         def colored(n: int) -> tuple[int, int, int]:
@@ -143,7 +150,7 @@ class ResourceBar:
         return [
             (f"Налоги ({self.economy.employed} работающих × {TAX_PER_WORKER}): "
              f"{format_signed(report.taxes)}", colored(report.taxes)),
-            (f"Доход предприятий ({round(self.economy.staffing * 100)}% работников): "
+            (f"Доход предприятий (работников {round(self.economy.staffing * 100)}%): "
              f"{format_signed(report.income)}", colored(report.income)),
             (f"Содержание зданий: {format_signed(-report.upkeep)}", colored(-report.upkeep)),
             (f"Итого за тик: {format_signed(report.net)}", colored(report.net)),
@@ -151,14 +158,30 @@ class ResourceBar:
 
     # --- Раскладка и отрисовка ---
 
-    def update(self, mouse_pos: tuple[int, int]) -> None:
-        """Пересчитать тексты и положение всех частей панели."""
+    def update(self, mouse_pos: tuple[int, int], max_right: int | None = None) -> None:
+        """Пересчитать тексты и положение всех частей панели.
+        max_right — правая граница, за которую нельзя заезжать (кнопки в углу).
+        Не помещаемся — раскладываем ещё раз с короткими подписями."""
+        self._layout(self._segments())
+        if max_right is not None and self.rect.right > max_right:
+            self._layout(self._segments(compact=True))
+
+        # Подсветка: «нажата» кнопка текущей скорости (или паузы)
+        self.pause_button.active = self.clock.paused
+        for speed, button in self.speed_buttons.items():
+            button.active = self.clock.speed == speed
+        for button in self.buttons:
+            button.update(mouse_pos)
+
+        self.show_tooltip = self.money_rect.collidepoint(mouse_pos)
+
+    def _layout(self, segments: list[list[Piece]]) -> None:
+        """Разложить тексты и кнопки слева направо и посчитать ширину панели."""
         self._texts.clear()
         self._separators.clear()
         center_y = self.rect.centery
         x = self.rect.left + PADDING
 
-        segments = self._segments()
         for index, segment in enumerate(segments):
             if index > 0:
                 self._separators.append(x + SEGMENT_GAP // 2)
@@ -180,15 +203,6 @@ class ResourceBar:
             button.rect.midleft = (x, center_y)
             x = button.rect.right + 4
         self.rect.width = x - 4 + PADDING - self.rect.left
-
-        # Подсветка: «нажата» кнопка текущей скорости (или паузы)
-        self.pause_button.active = self.clock.paused
-        for speed, button in self.speed_buttons.items():
-            button.active = self.clock.speed == speed
-        for button in self.buttons:
-            button.update(mouse_pos)
-
-        self.show_tooltip = self.money_rect.collidepoint(mouse_pos)
 
     def draw(self, screen: pygame.Surface) -> None:
         pygame.draw.rect(screen, COLOR_MENU_PANEL, self.rect, border_radius=UI_BORDER_RADIUS)
