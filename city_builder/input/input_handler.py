@@ -9,6 +9,8 @@
    Подходит для плавного движения: пока стрелка зажата — камера едет.
 """
 
+from __future__ import annotations
+
 import math
 
 import pygame

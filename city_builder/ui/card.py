@@ -23,6 +23,10 @@
   * item_id — какой товар выбран (включает режим строительства).
 """
 
+from __future__ import annotations
+
+from typing import Tuple
+
 from dataclasses import dataclass
 
 import pygame
@@ -41,7 +45,7 @@ from city_builder.config import (
     UI_BORDER_RADIUS,
 )
 
-Color = tuple[int, int, int]
+Color = Tuple[int, int, int]
 
 
 @dataclass

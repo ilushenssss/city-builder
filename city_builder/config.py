@@ -5,6 +5,8 @@
 соглашение Python для констант.
 """
 
+from __future__ import annotations
+
 from pathlib import Path
 
 # --- Файлы ---

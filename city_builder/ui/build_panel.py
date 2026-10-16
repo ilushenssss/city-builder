@@ -18,6 +18,10 @@
 нажатия кнопок. Логика — в construction/build_mode.py и demolish_mode.py.
 """
 
+from __future__ import annotations
+
+from typing import Tuple
+
 import pygame
 
 from city_builder.config import (
@@ -46,7 +50,7 @@ from city_builder.ui.button import Button
 LEFT_BUTTON = 1
 PADDING = 14  # отступ текста и кнопок от края панели
 
-Color = tuple[int, int, int]
+Color = Tuple[int, int, int]
 
 
 class BuildPanel:

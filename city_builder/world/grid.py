@@ -5,6 +5,8 @@
 или нарисовать совсем по-другому (например, спрайтами вместо квадратов).
 """
 
+from __future__ import annotations
+
 import random
 from collections.abc import Iterator
 

@@ -11,6 +11,8 @@
 После победы и «Продолжить» панель показывает «Свободная игра».
 """
 
+from __future__ import annotations
+
 import pygame
 
 from city_builder.config import (

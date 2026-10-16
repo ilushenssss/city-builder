@@ -36,6 +36,8 @@
        − содержание = сумма upkeep ВСЕХ зданий (даже неработающих)
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 
 from city_builder.config import (

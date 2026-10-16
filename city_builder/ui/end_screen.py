@@ -18,6 +18,8 @@
 quit_requested) или вызывает goals.continue_playing(), а Game их обрабатывает.
 """
 
+from __future__ import annotations
+
 import pygame
 
 from city_builder.config import (

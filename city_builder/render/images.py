@@ -18,6 +18,10 @@
      по ключу (картинка, размер, прозрачность, тонировка) и берём готовую.
 """
 
+from __future__ import annotations
+
+from typing import Tuple
+
 from pathlib import Path
 
 import pygame
@@ -33,7 +37,7 @@ from city_builder.config import (
 from city_builder.data.catalog import Category, ShopItem
 from city_builder.render import iso_sprites
 
-Color = tuple[int, int, int]
+Color = Tuple[int, int, int]
 
 
 class ImageLibrary:

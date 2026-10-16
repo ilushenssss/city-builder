@@ -14,6 +14,10 @@
 Как это выглядит, решают Renderer (подсветка здания) и BuildPanel (панель внизу).
 """
 
+from __future__ import annotations
+
+from typing import Union
+
 from enum import Enum, auto
 
 import pygame
@@ -26,7 +30,7 @@ from city_builder.world.tile import Tile
 
 # Что можно снести: здание (дом, дорогу) или элемент сети (линию, трубу, светофор).
 # У обоих есть .item — товар из каталога (название и цена для возврата денег).
-Target = Building | Overlay
+Target = Union[Building, Overlay]
 
 LEFT_BUTTON = 1
 RIGHT_BUTTON = 3

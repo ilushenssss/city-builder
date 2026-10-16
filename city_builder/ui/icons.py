@@ -5,6 +5,8 @@
 Каждый значок рисуется один раз и запоминается (icon() с кэшем).
 """
 
+from __future__ import annotations
+
 import pygame
 
 SUPERSAMPLE = 4  # рисуем в 4 раза крупнее и плавно уменьшаем — края гладкие

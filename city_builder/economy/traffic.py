@@ -24,13 +24,17 @@
   * жители домов в пробках менее счастливы (до −CONGESTION_HAPPINESS).
 """
 
+from __future__ import annotations
+
+from typing import Tuple
+
 from collections import deque
 
 from city_builder.config import COMMUTE_SHARE, DEFAULT_ROAD_CAPACITY, INTERSECTION_CAPACITY
 from city_builder.world.building import Building
 from city_builder.world.grid import Grid
 
-Tile = tuple[int, int]
+Tile = Tuple[int, int]
 
 
 class TrafficModel:

@@ -24,6 +24,8 @@
 В конце узлы с одинаковым «корнем» — одна сеть.
 """
 
+from __future__ import annotations
+
 from collections import deque
 from dataclasses import dataclass
 

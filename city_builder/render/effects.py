@@ -16,6 +16,10 @@
 а анимация постройки и всплывающие числа — в реальном (видны и на паузе).
 """
 
+from __future__ import annotations
+
+from typing import Tuple
+
 import math
 import random
 from dataclasses import dataclass
@@ -40,7 +44,7 @@ from city_builder.render import iso
 from city_builder.world.building import Building
 from city_builder.world.grid import Grid
 
-Color = tuple[int, int, int]
+Color = Tuple[int, int, int]
 
 
 @dataclass

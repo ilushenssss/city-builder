@@ -34,6 +34,10 @@ TEXTURE_SUPERSAMPLE раз крупнее, а в конце (result) плавн�
 правая — темнее. Тени падают вправо-вниз.
 """
 
+from __future__ import annotations
+
+from typing import Tuple
+
 import math
 import random
 
@@ -50,8 +54,8 @@ from city_builder.config import (
 DTW = 128
 DTH = 64
 
-Color = tuple[int, int, int]
-Point = tuple[float, float]
+Color = Tuple[int, int, int]
+Point = Tuple[float, float]
 
 # Яркость граней (множитель цвета)
 SHADE_TOP = 1.10

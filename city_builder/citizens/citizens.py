@@ -22,6 +22,8 @@ RESIDENTS_PER_WALKER жителей, но не больше MAX_WALKERS.
 Время — игровое: на паузе все стоят, на скорости ×3 бегут втрое быстрее.
 """
 
+from __future__ import annotations
+
 import math
 import random
 from dataclasses import dataclass, field

@@ -16,6 +16,8 @@
 Поэтому завод лучше ставить подальше от домов, а парк и школу — поближе.
 """
 
+from __future__ import annotations
+
 from city_builder.config import BASE_HAPPINESS
 from city_builder.world.building import Building
 

@@ -7,6 +7,8 @@ Button(rect, text="Построить")     — кнопка с надписью
 этих символов может не оказаться, и вместо них появятся «квадратики».
 """
 
+from __future__ import annotations
+
 import math
 
 import pygame

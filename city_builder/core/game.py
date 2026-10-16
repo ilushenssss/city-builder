@@ -21,6 +21,8 @@ Game — «дирижёр». Сам почти ничего не делает, �
      └── GameLoop      — крутит цикл и вызывает методы Game каждый кадр
 """
 
+from __future__ import annotations
+
 import sys
 
 import pygame

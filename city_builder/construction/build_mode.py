@@ -29,6 +29,10 @@
 (призрак на карте) и BuildPanel (панель внизу экрана).
 """
 
+from __future__ import annotations
+
+from typing import Tuple
+
 from enum import Enum, auto
 
 import pygame
@@ -43,7 +47,7 @@ from city_builder.world.tile import Tile
 LEFT_BUTTON = 1
 RIGHT_BUTTON = 3
 
-Site = tuple[int, int]  # клетка (x, y): левый верхний угол здания
+Site = Tuple[int, int]  # клетка (x, y): левый верхний угол здания
 
 
 class BuildState(Enum):

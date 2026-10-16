@@ -16,6 +16,8 @@
 а Renderer по ним пересчитывает, где что рисовать.
 """
 
+from __future__ import annotations
+
 from city_builder.config import ZOOM_MAX, ZOOM_MIN
 
 

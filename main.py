@@ -1,5 +1,7 @@
 """Точка входа в игру. Запуск: python main.py"""
 
+from __future__ import annotations
+
 import sys
 
 from city_builder.core.game import Game

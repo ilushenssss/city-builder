@@ -10,6 +10,8 @@
 (auto_view) — и выключается, когда строительство закончено.
 """
 
+from __future__ import annotations
+
 import pygame
 
 from city_builder.config import (

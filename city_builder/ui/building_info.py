@@ -12,6 +12,10 @@
 Так игрок видит, ПОЧЕМУ здание не работает и что ему нужно.
 """
 
+from __future__ import annotations
+
+from typing import Tuple
+
 import pygame
 
 from city_builder.config import (
@@ -37,7 +41,7 @@ PROBLEM_TEXTS = {
     "water": "нет воды",
 }
 
-Color = tuple[int, int, int]
+Color = Tuple[int, int, int]
 
 
 def _problem_text(b: Building, problem: str, networks: Infrastructure | None) -> str:

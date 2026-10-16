@@ -12,6 +12,10 @@
     └──────────────────────────────────┘
 """
 
+from __future__ import annotations
+
+from typing import Tuple
+
 import pygame
 
 from city_builder.config import (
@@ -35,8 +39,8 @@ PADDING = 12
 VALUE_X = 100   # где начинаются числа (от левого края панели)
 DELTA_X = 182   # где изменение за тик и пояснения
 
-Color = tuple[int, int, int]
-Row = tuple[str, str, Color, str, Color]  # (название, значение, его цвет, изменение, его цвет)
+Color = Tuple[int, int, int]
+Row = Tuple[str, str, Color, str, Color]  # (название, значение, его цвет, изменение, его цвет)
 
 
 class CityPanel:

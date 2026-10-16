@@ -12,6 +12,8 @@
 Так экономика работает одинаково при любом FPS.
 """
 
+from __future__ import annotations
+
 from city_builder.config import GAME_SPEEDS, MAX_TICKS_PER_FRAME, TICK_SECONDS
 
 

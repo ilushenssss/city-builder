@@ -18,13 +18,15 @@
 с понятным сообщением, а не упадёт непонятно где посреди игры.
 """
 
+from __future__ import annotations
+
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Tuple
 
 # Цвет — три числа (красный, зелёный, синий) от 0 до 255
-Color = tuple[int, int, int]
+Color = Tuple[int, int, int]
 
 # Где можно ставить товар (поле "placement" в shop.json)
 PLACEMENT_LAND = "land"              # только на суше (по умолчанию)

@@ -20,6 +20,8 @@
 (w, h) — ближний к зрителю.
 """
 
+from __future__ import annotations
+
 import sys
 from collections.abc import Callable
 from pathlib import Path

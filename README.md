@@ -117,6 +117,16 @@ pip install -r requirements.txt
 python main.py
 ```
 
+**Версия Python:** ветка `old-python` работает на **Python 3.8 и новее** (проверено на 3.8,
+3.9 и 3.14). pip сам подберёт подходящую pygame-ce: для Python 3.8 — 2.5.2, для 3.9 — 2.5.6.
+
+Чем эта ветка отличается от `master`: в каждом модуле есть строка
+`from __future__ import annotations` — с ней подсказки типов вида `int | None` и
+`list[str]` не вычисляются при запуске (иначе Python 3.8/3.9 падал бы с ошибкой).
+А псевдонимы типов, которые вычисляются при импорте, записаны через модуль `typing`:
+`Color = Tuple[int, int, int]` вместо `tuple[int, int, int]`,
+`Union[Building, Overlay]` вместо `Building | Overlay`.
+
 Игра открывается на весь экран в разрешении монитора. Чтобы запустить
 в обычном окне, поставьте `FULLSCREEN = False` в `city_builder/config.py`.
 

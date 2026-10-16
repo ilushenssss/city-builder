@@ -9,6 +9,8 @@
 висит несколько секунд и плавно исчезает.
 """
 
+from __future__ import annotations
+
 import pygame
 
 from city_builder.config import (

@@ -14,6 +14,10 @@
 пересчитывается каждый кадр в update().
 """
 
+from __future__ import annotations
+
+from typing import Tuple, Union
+
 import pygame
 
 from city_builder.config import (
@@ -60,7 +64,7 @@ ICON_SIZE = 20
 ICON_GAP = 6  # расстояние от значка до числа
 
 # Кусок блока: текст одного цвета ("1 250", жёлтый) или готовая картинка (значок).
-Piece = tuple[str | pygame.Surface, tuple[int, int, int]]
+Piece = Tuple[Union[str, pygame.Surface], Tuple[int, int, int]]
 
 
 def format_number(n: int) -> str:

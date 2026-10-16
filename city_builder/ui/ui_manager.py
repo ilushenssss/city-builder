@@ -19,6 +19,8 @@ Game общается только с UIManager, а не с каждой кно�
 выбор товара выключает снос, включение сноса выключает строительство.
 """
 
+from __future__ import annotations
+
 import pygame
 
 from city_builder.config import (

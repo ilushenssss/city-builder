@@ -14,6 +14,8 @@
 Тогда победа и поражение больше не проверяются.
 """
 
+from __future__ import annotations
+
 from enum import Enum, auto
 
 from city_builder.config import BANKRUPTCY_TICKS, GOAL_POPULATION, LEVEL_POPULATION

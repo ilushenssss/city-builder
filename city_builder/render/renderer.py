@@ -26,6 +26,8 @@ Renderer только рисует: он читает данные (Grid, Camera
 вызывает pygame.display.flip(), и картинка появляется на экране.
 """
 
+from __future__ import annotations
+
 import math
 
 import pygame

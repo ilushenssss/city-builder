@@ -19,6 +19,10 @@
 (сдвиг + масштаб) так же, как раньше, — она про изометрию ничего не знает.
 """
 
+from __future__ import annotations
+
+from typing import Tuple
+
 import math
 
 from city_builder.config import ISO_TILE_HEIGHT, ISO_TILE_WIDTH
@@ -26,7 +30,7 @@ from city_builder.config import ISO_TILE_HEIGHT, ISO_TILE_WIDTH
 HALF_W = ISO_TILE_WIDTH / 2
 HALF_H = ISO_TILE_HEIGHT / 2
 
-Point = tuple[float, float]
+Point = Tuple[float, float]
 
 
 def tile_to_world(tx: float, ty: float) -> Point:
